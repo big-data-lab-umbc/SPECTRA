@@ -1,0 +1,26 @@
+# Cell: Scale-MAE fMoW-RGB x Landslide4Sense (RGB band-selection baseline)
+# Native chips are 128x128, already divisible by Scale-MAE patch size 16.
+
+backbone: scalemae_fmow_rgb
+dataset: landslide4sense
+seed: 42
+
+epochs: 50
+batch_size: 8
+img_size: 128
+crop_size: 128
+pad_multiple: 16
+eval_metric: miou
+
+use_ssc_pe: false
+
+class_weighting:
+  scheme: inverse_frequency
+  absent_class_weight: 0.0
+  max_ratio: null
+  binary_minority_boost: 2.0
+
+stlora:
+  epsilon: 0.02
+  purity_tau: 0.8
+  min_rank: 4

@@ -1,0 +1,29 @@
+# Cell: SatMAE multispectral ViT-L x GEO-Bench m-SA-crop-type
+# SatMAE-native path selects 10 Sentinel-2 bands:
+# B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12.
+
+backbone: satmae_sentinel_vitl
+dataset: geobench_sa_crop_type
+seed: 42
+
+epochs: 50
+batch_size: 8
+img_size: 96
+crop_size: 96
+pad_multiple: 8
+eval_metric: miou
+
+use_ssc_pe: false
+
+class_weights: auto
+class_weighting:
+  scheme: enet_log
+  log_smoothing: 1.02
+  absent_class_weight: 0.0
+  max_ratio: null
+  binary_minority_boost: 2.0
+
+stlora:
+  epsilon: 0.02
+  purity_tau: 0.8
+  min_rank: 4

@@ -1,0 +1,28 @@
+# Cell: Scale-MAE fMoW-RGB x GEO-Bench m-SA-crop-type
+# Uses RGB band selection from the 12 Sentinel-2 bands.
+
+backbone: scalemae_fmow_rgb
+dataset: geobench_sa_crop_type
+seed: 42
+
+epochs: 50
+batch_size: 8
+img_size: 224
+crop_size: 224
+pad_multiple: 16
+eval_metric: miou
+
+use_ssc_pe: false
+
+class_weights: auto
+class_weighting:
+  scheme: enet_log
+  log_smoothing: 1.02
+  absent_class_weight: 0.0
+  max_ratio: null
+  binary_minority_boost: 2.0
+
+stlora:
+  epsilon: 0.02
+  purity_tau: 0.8
+  min_rank: 4

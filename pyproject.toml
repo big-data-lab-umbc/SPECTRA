@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spectra-geofm"
+version = "0.1.0"
+description = "SPECTRA: Band-Routed Embedding and Stage-wise Transferability-aware LoRA for geospatial foundation model adaptation"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "torch>=2.0",
+  "numpy",
+  "scipy",
+  "scikit-learn",
+  "pyyaml",
+  "rasterio",
+  "h5py",
+  "pillow",
+  "matplotlib",
+  "tqdm",
+]
+
+[tool.setuptools.packages.find]
+include = ["spectra*"]

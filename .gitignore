@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+*.egg-info/
+
+# Experiment artifacts
+results/**
+!results/.gitkeep
+features/
+finetune_results/
+runs/
+wandb/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.onnx.data
+
+# Logs and local env
+*.out
+*.err
+*.log
+.env
+.DS_Store

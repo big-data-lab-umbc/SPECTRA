@@ -1,0 +1,31 @@
+# Cell: SatMAE multispectral ViT-L x Landslide4Sense (binary segmentation, S2+DEM 14B)
+# SatMAE-native path selects 10 Sentinel-2 bands:
+# B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12.
+
+backbone: satmae_sentinel_vitl
+dataset: landslide4sense
+seed: 42
+
+epochs: 50
+batch_size: 8
+img_size: 128
+crop_size: 128
+pad_multiple: 8
+eval_metric: miou
+
+use_ssc_pe: false
+
+class_weighting:
+  scheme: inverse_frequency
+  absent_class_weight: 0.0
+  max_ratio: null
+  binary_minority_boost: 2.0
+
+dice:
+  class_mode: foreground
+  include_background: false
+
+stlora:
+  epsilon: 0.02
+  purity_tau: 0.8
+  min_rank: 4

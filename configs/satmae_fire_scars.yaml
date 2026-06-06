@@ -1,0 +1,32 @@
+# Cell: SatMAE multispectral ViT-L x FireScars (binary segmentation, HLS 6B)
+# SatMAE-native path expects ten Sentinel-2-like bands. FireScars has six HLS
+# bands, so closest-band selection may repeat channels to match the SatMAE
+# grouped patch embedding.
+
+backbone: satmae_sentinel_vitl
+dataset: fire_scars
+seed: 42
+
+epochs: 10
+batch_size: 8
+img_size: 128
+crop_size: 128
+pad_multiple: 8
+eval_metric: miou
+
+use_ssc_pe: false
+
+class_weighting:
+  scheme: inverse_frequency
+  absent_class_weight: 0.0
+  max_ratio: null
+  binary_minority_boost: 2.0
+
+dice:
+  class_mode: foreground
+  include_background: false
+
+stlora:
+  epsilon: 0.02
+  purity_tau: 0.8
+  min_rank: 4

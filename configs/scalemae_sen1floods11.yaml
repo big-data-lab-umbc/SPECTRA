@@ -1,0 +1,21 @@
+# Cell: Scale-MAE fMoW-RGB x Sen1Floods11 (RGB band-selection baseline)
+# Scale-MAE is RGB-native, so *_bandsel methods select target bands closest to
+# fMoW/ImageNet RGB order: red, green, blue.
+
+backbone: scalemae_fmow_rgb
+dataset: sen1floods11
+seed: 42
+
+epochs: 50
+batch_size: 8
+img_size: 224
+crop_size: 224
+pad_multiple: 16
+eval_metric: miou
+
+use_ssc_pe: false
+
+stlora:
+  epsilon: 0.02
+  purity_tau: 0.8
+  min_rank: 4

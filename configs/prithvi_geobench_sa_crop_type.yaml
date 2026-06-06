@@ -1,0 +1,36 @@
+# Cell: Prithvi-EO-2.0 x GEO-Bench m-SA-crop-type (10-class S2 crop segmentation)
+# Uses 12 real Sentinel-2 spectral bands; drops the all-zero Cloud Probability channel.
+
+backbone: prithvi_eo_v2_600
+dataset: geobench_sa_crop_type
+seed: 42
+
+epochs: 50
+batch_size: 8
+img_size: 224
+crop_size: 224
+eval_metric: miou
+
+use_ssc_pe: false
+
+class_weights: auto
+class_weighting:
+  scheme: enet_log
+  log_smoothing: 1.02
+  absent_class_weight: 0.0
+  max_ratio: null
+  binary_minority_boost: 2.0
+
+dice:
+  class_mode: present_train
+  include_background: false
+
+ssc_pe:
+  srf_dim: 64
+  mixer_rank: 16
+  use_gate: true
+
+stlora:
+  epsilon: 0.02
+  purity_tau: 0.8
+  min_rank: 4

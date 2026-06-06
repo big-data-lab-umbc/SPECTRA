@@ -1,0 +1,70 @@
+# Base config — values inherited by all per-cell configs
+# Override by specifying the same key in the cell config.
+
+backbone: prithvi_eo_v2_600
+dataset: fire_scars
+seed: 42
+
+# Training
+epochs: 10
+batch_size: 8
+num_workers: 4
+crop_size: 224
+lr_adapter: 5.0e-5         # LoRA A/B adapters
+lr_backbone: 5.0e-6        # unfrozen backbone weights (full_ft, last_stage, surgical) — 10× lower
+lr_ssc_pe: 1.0e-3          # SSC-PE tokenizer during SPECTRA warmup
+lr_ssc_pe_ft: 1.0e-4       # SSC-PE lr during main fine-tuning (10× lower prevents post-warmup instability)
+lr_head: 5.0e-4            # segmentation / classification head
+weight_decay: 0.05
+max_grad_norm: 1.0          # gradient clipping (prevents catastrophic instability)
+img_size: 224
+
+# SSC-PE tokenizer — set false for same-sensor calibration cells (native patch_embed used)
+use_ssc_pe: false
+
+# learning rate for BandProjectorMLP parameters
+
+ssc_pe:
+  # patch_size and embed_dim are read from BACKBONE_SPECS unless overridden here
+  srf_dim: 64
+  mixer_rank: 16
+  use_gate: true
+  use_deepset: false        # triple fallback (DeepSet = false) by default
+
+# ST-LoRA / STPlanner defaults
+stlora:
+  epsilon: 0.02
+  delta: 0.01
+  b_param: 0.50
+  b_gpu: 0.50
+  n_probe_images: 1000
+  warmup_steps: [200, 300, 400, 500, 600, 700, 800]
+  purity_tau: 0.8
+  rho_threshold: 0.95
+
+# Nested LoRA
+lora:
+  max_rank: 16
+  n_stages: 4
+
+# Evaluation
+eval_metric: miou           # miou | map
+class_weights: auto         # auto=compute from train split, null=none, [w0,w1,...]=manual
+class_weighting:
+  # Generic CE weighting for class_weights: auto.
+  # Present classes use inverse-frequency weights. Absent classes get
+  # absent_class_weight instead of an unbounded inverse-frequency value.
+  scheme: inverse_frequency
+  absent_class_weight: 0.0
+  max_ratio: null            # optional cap on max/min present-class weight
+  binary_minority_boost: 2.0 # only used when n_classes == 2
+dice:
+  class_mode: default        # default/foreground = existing behavior; present_train/all available
+  include_background: false  # class 0 is skipped unless this is true or CLI enables it
+
+# Logging
+use_wandb: false
+wandb_project: SPECTRA
+
+# Paths (resolved from spectra/data/config.py at runtime)
+results_dir: results
