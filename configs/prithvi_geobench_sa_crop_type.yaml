@@ -11,7 +11,6 @@ img_size: 224
 crop_size: 224
 eval_metric: miou
 
-use_ssc_pe: false
 
 class_weights: auto
 class_weighting:
@@ -25,12 +24,6 @@ dice:
   class_mode: present_train
   include_background: false
 
-ssc_pe:
-  srf_dim: 64
-  mixer_rank: 16
-  use_gate: true
 
 stlora:
-  epsilon: 0.02
   purity_tau: 0.8
-  min_rank: 4

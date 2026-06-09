@@ -14,7 +14,6 @@ crop_size: 128
 pad_multiple: 8
 eval_metric: miou
 
-use_ssc_pe: false
 
 class_weighting:
   scheme: inverse_frequency
@@ -27,6 +26,4 @@ dice:
   include_background: false
 
 stlora:
-  epsilon: 0.02
   purity_tau: 0.8
-  min_rank: 4

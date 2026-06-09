@@ -11,7 +11,6 @@ img_size: 128
 crop_size: 128
 eval_metric: miou
 
-use_ssc_pe: false
 
 class_weighting:
   scheme: inverse_frequency
@@ -23,12 +22,6 @@ dice:
   class_mode: foreground
   include_background: false
 
-ssc_pe:
-  srf_dim: 64
-  mixer_rank: 16
-  use_gate: true
 
 stlora:
-  epsilon: 0.02
   purity_tau: 0.8
-  min_rank: 4

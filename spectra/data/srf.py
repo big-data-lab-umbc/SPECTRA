@@ -141,8 +141,8 @@ LANDSLIDE_14B: list[BandSRF] = [
 
 # ---------------------------------------------------------------------------
 # HLS multi-temporal — 18 bands (3 time steps × 6 HLS bands)
-# Same spectral response functions repeated per time step; SSC-PE treats each
-# band independently so the SRF triples encode only spectral identity, not time.
+# Same spectral response functions repeated per time step; each band keeps its
+# spectral identity while the time-step identity is handled by the dataset.
 # ---------------------------------------------------------------------------
 HLS_18B: list[BandSRF] = HLS_6B * 3   # T1_B1..T1_B6, T2_B1..T2_B6, T3_B1..T3_B6
 
@@ -260,7 +260,7 @@ def select_closest_bands(
 ) -> list[int]:
     """Select one band per reference wavelength by nearest-center-wavelength matching.
 
-    Used to build the DEFLECT LR stream: maps the pre-training sensor's N bands
+    Used by band selection and BRE to map the pre-training sensor's N bands
     onto the best-matching N bands in the target sensor.
 
     Args:

@@ -5,23 +5,22 @@ segmentation fine-tuning of geospatial foundation models.
 
 SPECTRA combines:
 
-1. **BRE-PoG**: Band-Routed Embedding with per-output gates. BRE keeps the
-   pretrained patch embedding frozen, selects pretrained-compatible target
-   bands, and learns a zero-initialized residual correction from all available
-   source bands.
+1. **BRE**: Band-Routed Embedding. BRE keeps the pretrained patch embedding
+   frozen, selects pretrained-compatible target bands, and learns a
+   zero-initialized residual correction from all available source bands.
 2. **ST-LoRA**: Stage-wise Transferability-aware LoRA. The **STPlanner** profiles
    stage-wise transferability and chooses per-stage LoRA ranks under a LoRA rank
    budget. Both `transfer` and `repair` planning modes are included.
 
-The public training CLI intentionally exposes only the methods used for the main
-comparison table:
+The public training CLI exposes only the methods used for the main comparison
+table:
 
 - `lp`
 - `lora8`, `lora16`, `lora32`, `lora64`
 - `last_stage`
 - `surgical`
 - `full_ft`
-- `spectra` = BRE-PoG + ST-LoRA
+- `spectra` = BRE + ST-LoRA
 
 ## Installation
 
@@ -50,9 +49,6 @@ export SPECTRA_GEOBENCH_SA_CROP_TYPE_ROOT=/path/to/Geobench_SA_crop_type
 ```
 
 ## Training examples
-
-All published configs use UPerNet-style decoding, half learning rates from the
-main experiments, and either DWA(CE/weighted CE, Dice) or CE/weighted CE+Dice.
 
 LoRA32 baseline:
 

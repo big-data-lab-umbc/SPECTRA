@@ -17,9 +17,38 @@ from pathlib import Path
 from typing import Optional
 
 from .logme_profiler import StagewiseProfile
-from .mgas import compute_param_cost, compute_time_cost
 
 logger = logging.getLogger(__name__)
+
+
+def compute_param_cost(
+    ranks: list[int],
+    unfrozen: list[bool],
+    embed_dim: int,
+    stage_dims: list[int],
+    stage_n_params: list[int],
+) -> float:
+    """Compute adapter plus unfrozen parameter cost as a full-FT fraction."""
+    total_lora = sum(r * (embed_dim + d) for r, d in zip(ranks, stage_dims))
+    total_unfrozen = sum(u * n for u, n in zip(unfrozen, stage_n_params))
+    full_ft = sum(stage_n_params)
+    return (total_lora + total_unfrozen) / max(full_ft, 1)
+
+
+def compute_time_cost(
+    ranks: list[int],
+    unfrozen: list[bool],
+    t_lora: list[float],
+    t_full: list[float],
+    gamma: float = 1.0,
+) -> float:
+    """Compute adapter plus unfrozen stage time as a full-FT fraction."""
+    total_time = gamma * sum(
+        int(r > 0) * tl + int(u) * tf
+        for r, u, tl, tf in zip(ranks, unfrozen, t_lora, t_full)
+    )
+    full_time = gamma * sum(t_full)
+    return total_time / max(full_time, 1e-9)
 
 
 @dataclass
@@ -177,9 +206,7 @@ class STPlanner:
                         continue
         if values:
             return min(values), max(values)
-        logger.warning(
-            "ST-LoRA q-bank unavailable; using q_overall as both min/max, q_norm will be 0.5"
-        )
+        logger.warning("ST-LoRA q-bank unavailable; using a local fallback range")
         eps = 1.0
         return q_overall - eps, q_overall + eps
 
@@ -224,7 +251,6 @@ def _allocate_ranks(
     continuous = [min_rank + remaining * float(w) for w in weights]
     ranks = [_floor_to_grid(x, grid, min_rank) for x in continuous]
 
-    # Budget is an upper bound. Upgrade only if it reduces rounding error.
     while True:
         used = sum(ranks)
         candidates = []

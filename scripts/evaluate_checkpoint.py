@@ -29,9 +29,7 @@ from finetune import (  # noqa: E402
     residual_init_norms,
     set_all_seeds,
     setup_file_logging,
-    wire_band_projector,
     wire_band_selector,
-    wire_ssc_pe,
 )
 from spectra.adapter.nested_lora import NestedLoRABackbone, set_rank_grid  # noqa: E402
 from spectra.data.config import BACKBONE_SPECS, FULL_BAND_CONFIGS, RESULTS_DIR  # noqa: E402
@@ -41,18 +39,8 @@ from spectra.evaluation.segmentation_eval import (  # noqa: E402
     evaluate_segmentation,
     save_segmentation_visualizations,
 )
-from spectra.tokenizer.band_projector import BandProjectorMLP  # noqa: E402
 from spectra.tokenizer.band_selector import BandSelector  # noqa: E402
-from spectra.tokenizer.band_contribution_router import (  # noqa: E402
-    BandContributionRouterResidual,
-    BandGatedResidual,
-    BandPerOutputGatedResidual,
-    BandSourceToTargetGatedResidual,
-    LightweightResidualGate,
-)
-from spectra.tokenizer.dual_patch_embed import DualPatchEmbed  # noqa: E402
-from spectra.tokenizer.ssc_pe import SSCPE  # noqa: E402
-from spectra.tokenizer.virtual_band_residual import VirtualBandResidual  # noqa: E402
+from spectra.tokenizer.bre import BRE  # noqa: E402
 
 
 logger = logging.getLogger("evaluate_checkpoint")
@@ -136,41 +124,11 @@ def _checkpoint_meta(path: Path) -> dict[str, Any]:
 
 
 def _method_flags(method: str, cfg: dict) -> dict[str, Any]:
-    flags = {
-        "use_ssc_pe": cfg.get("use_ssc_pe", True),
-        "use_mlp_proj": cfg.get("use_mlp_proj", False),
-        "use_band_select": False,
-        "use_dual_patch": False,
-        "use_virtual_residual": False,
-        "virtual_residual_mode": None,
-        "sched_method": method,
-    }
-    suffix_map = {
-        "_sscpe": {"use_ssc_pe": True, "use_mlp_proj": False},
-        "_mlp": {"use_ssc_pe": False, "use_mlp_proj": True},
-        "_bandsel": {"use_ssc_pe": False, "use_mlp_proj": False, "use_band_select": True},
-        "_dual": {"use_ssc_pe": False, "use_mlp_proj": False, "use_dual_patch": True},
-        "_router_static_all": {"use_ssc_pe": False, "use_mlp_proj": False, "use_virtual_residual": True, "virtual_residual_mode": "router_static_all"},
-        "_bre_anchor_all": {"use_ssc_pe": False, "use_mlp_proj": False, "use_virtual_residual": True, "virtual_residual_mode": "bre_anchor_all"},
-        "_bre_gatedD": {"use_ssc_pe": False, "use_mlp_proj": False, "use_virtual_residual": True, "virtual_residual_mode": "bre_gatedD"},
-        "_bre_light_gate": {"use_ssc_pe": False, "use_mlp_proj": False, "use_virtual_residual": True, "virtual_residual_mode": "bre_light_gate"},
-        "_bre_perout_gate": {"use_ssc_pe": False, "use_mlp_proj": False, "use_virtual_residual": True, "virtual_residual_mode": "bre_perout_gate"},
-        "_bre_s2t": {"use_ssc_pe": False, "use_mlp_proj": False, "use_virtual_residual": True, "virtual_residual_mode": "bre_s2t"},
-        "_resB": {"use_ssc_pe": False, "use_mlp_proj": False, "use_virtual_residual": True, "virtual_residual_mode": "extra"},
-        "_resC": {"use_ssc_pe": False, "use_mlp_proj": False, "use_virtual_residual": True, "virtual_residual_mode": "selected"},
-        "_resD": {"use_ssc_pe": False, "use_mlp_proj": False, "use_virtual_residual": True, "virtual_residual_mode": "all"},
-        "_resE": {"use_ssc_pe": False, "use_mlp_proj": False, "use_virtual_residual": True, "virtual_residual_mode": "shuffle_extra"},
-    }
-    for suffix, updates in suffix_map.items():
-        if method.endswith(suffix):
-            flags.update(updates)
-            flags["sched_method"] = method[: -len(suffix)]
-            if suffix != "_bandsel":
-                flags["use_band_select"] = False
-            if suffix != "_dual":
-                flags["use_dual_patch"] = updates.get("use_dual_patch", False)
-            return flags
-    return flags
+    if method.endswith("_bandsel"):
+        return {"use_band_select": True, "use_bre": False, "sched_method": method[:-len("_bandsel")]}
+    if method.endswith("_bre"):
+        return {"use_band_select": False, "use_bre": True, "sched_method": method[:-len("_bre")]}
+    return {"use_band_select": False, "use_bre": False, "sched_method": method}
 
 
 def _schedule_model(
@@ -187,7 +145,7 @@ def _schedule_model(
         if len(ranks) != n_stages or len(unfrozen) != n_stages:
             raise ValueError(f"--ranks/--unfrozen must have {n_stages} entries")
         lora_backbone.apply_schedule(ranks, unfrozen, fix_train_rank=True)
-        return {"method": args.method, "ranks": ranks, "unfrozen": unfrozen, "plan_source": "cli"}
+        return {"method": getattr(args, "public_method", args.method), "ranks": ranks, "unfrozen": unfrozen, "plan_source": "cli"}
 
     meta_schedule = checkpoint_meta.get("schedule", {})
     if isinstance(meta_schedule, dict) and "ranks" in meta_schedule and "unfrozen" in meta_schedule:
@@ -198,7 +156,7 @@ def _schedule_model(
 
     if sched_method in METHODS and METHODS.get(sched_method) is not None:
         sched = apply_baseline_schedule(sched_method, lora_backbone, cfg)
-        return {"method": args.method, "ranks": sched.ranks, "unfrozen": list(sched.unfrozen)}
+        return {"method": getattr(args, "public_method", args.method), "ranks": sched.ranks, "unfrozen": list(sched.unfrozen)}
 
     raise ValueError(
         f"Cannot infer schedule for method={args.method}. Pass --ranks and --unfrozen, "
@@ -228,7 +186,7 @@ def build_model_for_eval(
     selected_idx = None
     extra_idx = None
 
-    if flags["use_band_select"] or flags["use_dual_patch"] or flags["use_virtual_residual"]:
+    if flags["use_band_select"] or flags["use_bre"]:
         pretrain_sensor = BACKBONE_PRETRAIN_SENSOR.get(backbone_name, "fire_scars")
         pretrain_bands = get_srf(pretrain_sensor)
         ref_wavelengths = [b.center_nm for b in pretrain_bands]
@@ -236,125 +194,14 @@ def build_model_for_eval(
         selected_idx = list(bandsel_indices)
         extra_idx = [i for i in range(band_cfg.in_chans) if i not in bandsel_indices]
 
-    ssc_pe = None
-    if flags["use_ssc_pe"]:
-        ssc_pe_cfg = cfg.get("ssc_pe", {})
-        ssc_pe = SSCPE(
-            in_chans=band_cfg.in_chans,
-            embed_dim=ssc_pe_cfg.get("embed_dim", spec.embed_dim),
-            patch_size=ssc_pe_cfg.get("patch_size", spec.patch_size),
-            srf_dim=ssc_pe_cfg.get("srf_dim", 64),
-            mixer_rank=ssc_pe_cfg.get("mixer_rank", 16),
-            use_gate=ssc_pe_cfg.get("use_gate", True),
-        ).to(device)
-
-    band_proj = None
-    if flags["use_mlp_proj"]:
-        mlp_cfg = cfg.get("mlp_projector", {})
-        pretrain_sensor = BACKBONE_PRETRAIN_SENSOR.get(backbone_name, "fire_scars")
-        band_proj = BandProjectorMLP(
-            in_chans=band_cfg.in_chans,
-            out_chans=len(get_srf(pretrain_sensor)),
-            hidden_dim=mlp_cfg.get("hidden_dim", 32),
-        ).to(device)
-
     band_selector = None
     if flags["use_band_select"]:
         if bandsel_indices is None:
             raise RuntimeError("bandsel_indices not initialized")
         band_selector = BandSelector(bandsel_indices).to(device)
 
-    dual_pe = None
-    if flags["use_dual_patch"]:
-        if bandsel_indices is None:
-            raise RuntimeError("bandsel_indices not initialized")
-        dual_pe = DualPatchEmbed(
-            original_patch_embed=model.encoder.patch_embed,
-            band_indices=bandsel_indices,
-            in_chans_full=band_cfg.in_chans,
-            embed_dim=spec.embed_dim,
-            patch_size=spec.patch_size,
-        ).to(device)
-        model.encoder.patch_embed = dual_pe
 
-    virt_res = None
-    if flags["use_virtual_residual"]:
-        if bandsel_indices is None or extra_idx is None:
-            raise RuntimeError("bandsel_indices not initialized")
-        set_all_seeds(seed_protocol["residual_seed"])
-        if flags["virtual_residual_mode"] == "router_static_all":
-            virt_res = BandContributionRouterResidual(
-                original_patch_embed=model.encoder.patch_embed,
-                selected_idx=bandsel_indices,
-                candidate_idx=list(range(band_cfg.in_chans)),
-                in_chans_full=band_cfg.in_chans,
-                hidden_dim=cfg.get("vres_hidden_dim", 32),
-            ).to(device)
-        elif flags["virtual_residual_mode"] == "bre_anchor_all":
-            virt_res = BandContributionRouterResidual(
-                original_patch_embed=model.encoder.patch_embed,
-                selected_idx=bandsel_indices,
-                candidate_idx=list(range(band_cfg.in_chans)),
-                in_chans_full=band_cfg.in_chans,
-                hidden_dim=cfg.get("vres_hidden_dim", 32),
-                router_init="anchor",
-                anchor_logit=float(cfg.get("bre_anchor_logit", 4.0)),
-            ).to(device)
-            virt_res.mask_mode = "bre_anchor_all"
-        elif flags["virtual_residual_mode"] == "bre_gatedD":
-            virt_res = BandGatedResidual(
-                original_patch_embed=model.encoder.patch_embed,
-                selected_idx=bandsel_indices,
-                in_chans_full=band_cfg.in_chans,
-                hidden_dim=cfg.get("vres_hidden_dim", 32),
-                gate_max=float(cfg.get("bre_gate_max", 2.0)),
-            ).to(device)
-        elif flags["virtual_residual_mode"] == "bre_light_gate":
-            virt_res = LightweightResidualGate(
-                original_patch_embed=model.encoder.patch_embed,
-                selected_idx=bandsel_indices,
-                in_chans_full=band_cfg.in_chans,
-                hidden_dim=cfg.get("vres_hidden_dim", 32),
-                gate_max=float(cfg.get("bre_gate_max", 2.0)),
-            ).to(device)
-        elif flags["virtual_residual_mode"] == "bre_perout_gate":
-            virt_res = BandPerOutputGatedResidual(
-                original_patch_embed=model.encoder.patch_embed,
-                selected_idx=bandsel_indices,
-                in_chans_full=band_cfg.in_chans,
-                hidden_dim=cfg.get("vres_hidden_dim", 32),
-                gate_max=float(cfg.get("bre_gate_max", 2.0)),
-            ).to(device)
-        elif flags["virtual_residual_mode"] == "bre_s2t":
-            virt_res = BandSourceToTargetGatedResidual(
-                original_patch_embed=model.encoder.patch_embed,
-                selected_idx=bandsel_indices,
-                in_chans_full=band_cfg.in_chans,
-                hidden_dim=cfg.get("vres_hidden_dim", 32),
-                gate_max=float(cfg.get("bre_gate_max", 2.0)),
-            ).to(device)
-        else:
-            virt_res = VirtualBandResidual(
-                original_patch_embed=model.encoder.patch_embed,
-                selected_idx=bandsel_indices,
-                extra_idx=extra_idx,
-                mask_mode=flags["virtual_residual_mode"],
-                in_chans_full=band_cfg.in_chans,
-                hidden_dim=cfg.get("vres_hidden_dim", 32),
-            ).to(device)
-        virt_res.force_delta_zero = bool(args.force_residual_zero)
-        virt_res.eval_shuffle_seed = int(seed_protocol["eval_shuffle_seed"])
-        virt_res.set_train_shuffle_seed(int(seed_protocol["train_shuffle_seed"]))
-        model.encoder.patch_embed = virt_res
-
-    if args.method == "deflect":
-        raise ValueError("scripts/evaluate_checkpoint.py does not support deflect checkpoints yet")
-
-    if flags["use_ssc_pe"]:
-        wire_ssc_pe(model, ssc_pe, backbone_name, default_srf=srf_triples)
-    elif flags["use_mlp_proj"]:
-        wire_band_projector(model, band_proj)
-    elif flags["use_band_select"]:
+    if flags["use_band_select"]:
         wire_band_selector(model, band_selector)
 
     lora_cfg = cfg.get("lora", {})
@@ -386,11 +233,9 @@ def build_model_for_eval(
 
     build_info = {
         "input_adapter": (
-            "sscpe" if flags["use_ssc_pe"]
-            else "mlp" if flags["use_mlp_proj"]
-            else "bandsel" if flags["use_band_select"]
-            else "dual" if flags["use_dual_patch"]
-            else f"resid_{flags['virtual_residual_mode']}" if flags["use_virtual_residual"]
+            "bandsel" if flags["use_band_select"]
+            else "dual" if False
+            else "bre" if flags["use_bre"]
             else "native"
         ),
         "schedule": schedule_info,
@@ -399,12 +244,12 @@ def build_model_for_eval(
         "head_weight_norm_before_load": head_weight_norm(model),
         "first_lora_A_norm_before_load": None,
         "first_lora_B_norm_before_load": None,
-        **residual_init_norms(virt_res),
+        **residual_init_norms(bre),
     }
-    if virt_res is not None and hasattr(virt_res, "contribution_matrix_full"):
-        build_info["router_candidate_idx"] = [int(x) for x in virt_res.candidate_idx.detach().cpu().tolist()]
-        build_info["router_contribution_matrix_before_load"] = virt_res.contribution_matrix_full()
-        build_info["router_top3_before_load"] = virt_res.top_contributions(k=3)
+    if bre is not None and hasattr(bre, "contribution_matrix_full"):
+        build_info["router_candidate_idx"] = [int(x) for x in bre.candidate_idx.detach().cpu().tolist()]
+        build_info["router_contribution_matrix_before_load"] = bre.contribution_matrix_full()
+        build_info["router_top3_before_load"] = bre.top_contributions(k=3)
     for stage in lora_backbone.stages:
         if stage.lora_layers:
             build_info["first_lora_A_norm_before_load"] = float(stage.lora_layers[0].A.detach().norm().item())
@@ -517,7 +362,7 @@ def main() -> None:
         "run_id": run_id,
         "dataset": cfg["dataset"],
         "backbone": cfg["backbone"],
-        "method": args.method,
+        "method": getattr(args, "public_method", args.method),
         "split": args.split,
         "seed": seed,
         "seed_protocol": seed_protocol,

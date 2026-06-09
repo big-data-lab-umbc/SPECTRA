@@ -11,14 +11,7 @@ img_size: 224
 eval_metric: miou
 
 # fire_scars = same HLS sensor as pretraining → native patch_embed works directly
-use_ssc_pe: false
 
-ssc_pe:
-  # patch_size=14, embed_dim=1280 from BACKBONE_SPECS (prithvi_eo_v2_600 = ViT-H)
-  srf_dim: 64
-  mixer_rank: 16
-  use_gate: true
 
 stlora:
-  epsilon: 0.02
   purity_tau: 0.8

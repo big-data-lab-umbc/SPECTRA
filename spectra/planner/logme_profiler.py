@@ -1,7 +1,7 @@
 """Stagewise LogME profiler with warm-up stopping rule.
 
 Computes q[s] = LogME(stage-s features, patch-purity-filtered labels) for s in 1..4.
-Used by MGAS to derive Δq[s] = q[4] - q[s] and select the adaptation schedule.
+Used by STPlanner to measure stage-wise transferability before rank planning.
 """
 
 from __future__ import annotations
@@ -296,11 +296,11 @@ class StagewiseLogMEProfiler:
         warmup_optimizer: torch.optim.Optimizer,
         train_fn,
     ) -> StagewiseProfile:
-        """Run SSC-PE warm-up with stopping rule, then measure stagewise profile.
+        """Run an optional supervised warm-up, then measure the stagewise profile.
 
         Args:
             probe_loader:     DataLoader yielding (images, seg_labels) batches
-            warmup_optimizer: Optimizer for SSC-PE + LoRA + head parameters
+            warmup_optimizer: Optimizer for adapter and head parameters
             train_fn:         Callable(images, labels) -> loss tensor.
                               Must handle moving tensors to device internally.
                               Typically runs the full encoder+decoder pipeline.
@@ -342,7 +342,7 @@ class StagewiseLogMEProfiler:
         # failure for nearly all ViT backbones.
         delta_q = [max(final_scores) - q for q in final_scores]
         # Precondition is satisfied when the profile has any discriminative structure.
-        # The "no signal" case (all Δq ≤ ε) is handled downstream by MGASPlanner.plan().
+        # Low-signal profiles are handled downstream by STPlanner.
         precondition_ok = max(delta_q) > 1e-6
 
         return StagewiseProfile(
@@ -356,8 +356,7 @@ class StagewiseLogMEProfiler:
     def profile_only(self, probe_loader) -> StagewiseProfile:
         """Measure stagewise profile on pretrained backbone without any warm-up.
 
-        Used when SSC-PE is disabled (same-sensor calibration cells): the backbone
-        is already pretrained with the target sensor, so there is nothing to warm up.
+        Used when no adapter warm-up is requested.
         """
         probe_images, probe_labels = self._collect_probe_data(probe_loader)
         scores = self._measure_profile(probe_images, probe_labels)

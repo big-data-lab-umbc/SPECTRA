@@ -13,9 +13,6 @@ crop_size: 224
 pad_multiple: 16
 eval_metric: miou
 
-use_ssc_pe: false
 
 stlora:
-  epsilon: 0.02
   purity_tau: 0.8
-  min_rank: 4

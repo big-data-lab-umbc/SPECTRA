@@ -1,7 +1,7 @@
 """Nested / Slimmable LoRA adapter for ViT backbones.
 
 Training: each minibatch samples rank k ~ Uniform({4,8,16}), rank-0 with prob 1/4.
-Eval:     truncate A_s[:k,:], B_s[:,:k] to the MGAS-selected rank.
+Eval:     truncate A_s[:k,:], B_s[:,:k] to the STPlanner-selected rank.
 
 The adapter wraps nn.Linear layers inside the backbone. A NestedLoRABackbone
 wraps all 4 stages and exposes per-stage rank control.
@@ -45,7 +45,7 @@ class NestedLoRALinear(nn.Module):
         self.A = nn.Parameter(torch.empty(max_rank, d_in, device=dev))
         self.B = nn.Parameter(torch.zeros(d_out, max_rank, device=dev))
         self.scaling = alpha / max_rank
-        self.eval_rank: int = max_rank  # set by MGASPlanner / schedule
+        self.eval_rank: int = max_rank  # set by STPlanner / schedule
         self.fixed_train_rank: Optional[int] = None  # None → stochastic (SPECTRA); int → fixed (baselines)
 
         nn.init.kaiming_uniform_(self.A, a=math.sqrt(5))
@@ -200,7 +200,7 @@ class NestedLoRABackbone(nn.Module):
 
     def apply_schedule(self, ranks: list[int], unfrozen: list[bool],
                        fix_train_rank: bool = False) -> None:
-        """Apply MGAS-selected (r_s, u_s) schedule to all stages.
+        """Apply STPlanner-selected (r_s, u_s) schedule to all stages.
 
         Args:
             ranks:          list of per-stage LoRA rank [r_0, r_1, r_2, r_3]

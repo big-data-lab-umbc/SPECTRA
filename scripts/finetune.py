@@ -4,7 +4,7 @@
 Supported methods:
   lp, lora8, lora16, lora32, lora64, last_stage, surgical, full_ft, spectra
 
-SPECTRA = Band-Routed Embedding (BRE-PoG) + ST-LoRA. ST-LoRA uses the
+SPECTRA = Band-Routed Embedding (BRE) + ST-LoRA. ST-LoRA uses the
 STPlanner in either transfer or repair mode to choose per-stage LoRA ranks.
 """
 
@@ -42,20 +42,9 @@ from spectra.data.config import (
     GEOBENCH_SA_CROP_TYPE_ROOT,
 )
 from spectra.data.srf import get_srf_triples, get_srf
-from spectra.tokenizer.ssc_pe import SSCPE
-from spectra.tokenizer.band_projector import BandProjectorMLP
 from spectra.tokenizer.band_selector  import BandSelector
-from spectra.tokenizer.dual_patch_embed import DualPatchEmbed
-from spectra.tokenizer.virtual_band_residual import VirtualBandResidual
-from spectra.tokenizer.band_contribution_router import (
-    BandContributionRouterResidual,
-    BandGatedResidual,
-    BandPerOutputGatedResidual,
-    BandSourceToTargetGatedResidual,
-    LightweightResidualGate,
-)
+from spectra.tokenizer.bre import BRE
 from spectra.adapter.nested_lora import NestedLoRABackbone
-from spectra.planner.mgas import MGASPlanner, MGASConfig
 from spectra.planner.stplanner import STPlanner, STPlannerConfig
 from spectra.planner.logme_profiler import StagewiseLogMEProfiler
 from spectra.baselines.schedules import (
@@ -87,7 +76,7 @@ METHODS = {
     "last_stage_bandsel": last_stage_full_ft_schedule,
     "surgical_bandsel": surgical_ft_schedule,
     "full_ft_bandsel": full_ft_schedule,
-    "spectra_bre_perout_gate": None,
+    "spectra_bre": None,
 }
 
 PUBLIC_METHOD_ALIASES = {
@@ -99,15 +88,14 @@ PUBLIC_METHOD_ALIASES = {
     "last_stage": "last_stage_bandsel",
     "surgical": "surgical_bandsel",
     "full_ft": "full_ft_bandsel",
-    "spectra": "spectra_bre_perout_gate",
+    "spectra": "spectra_bre",
 }
 
-# Pre-training sensor key per backbone (used for DEFLECT LR band selection)
+# Pre-training sensor key per backbone
 BACKBONE_PRETRAIN_SENSOR: dict[str, str] = {
     "prithvi_eo_v2_600": "fire_scars",   # HLS 6B (490,560,665,865,1610,2202 nm)
     "satmae":            "fire_scars",   # also HLS-based
     "satmae_sentinel_vitl": "satmae_s2_10b",  # fMoW-Sentinel groups: B2/B3/B4/B8, red-edge, SWIR
-    "dinov2_vitl14":     "loveda",       # ImageNet RGB ≈ 450/550/650 nm
     "scalemae_fmow_rgb": "fmow_rgb",     # fMoW RGB / ImageNet-normalized visual bands
 }
 
@@ -203,11 +191,6 @@ def parse_args() -> argparse.Namespace:
     args.eval_delta_off = False
     args.rank_grid = None
     args.staircase_thresholds = None
-    args.mgas_b_param = None
-    args.mgas_b_gpu = None
-    args.mgas_min_rank = None
-    args.mgas_unfreeze_min_delta_q = None
-    args.mgas_disable_unfreeze = True
     args.ranks = None
     args.unfrozen = None
     return args
@@ -220,8 +203,6 @@ def load_config(path: Path) -> dict:
         cfg = yaml.safe_load(base_path.read_text()) or {}
     override = yaml.safe_load(path.read_text()) or {}
     cfg.update(override)
-    if "stlora" in cfg and "mgas" not in cfg:
-        cfg["mgas"] = cfg["stlora"]
     return cfg
 
 
@@ -276,8 +257,6 @@ def prithvi_model_architecture(backbone_name: str) -> dict:
 
 def model_architecture_defaults(backbone_name: str) -> dict:
     """Return segmentation architecture metadata for supported backbones."""
-    if "dinov2" in backbone_name:
-        return {"decoder": "LinearSegHead", "feature_indices": None, "necks": None}
     if backbone_name == "satmae_sentinel_vitl":
         return {
             "decoder": "UperNetDecoder",
@@ -313,20 +292,6 @@ def setup_file_logging(run_id: str) -> Path:
     root_logger.addHandler(file_handler)
     logging.captureWarnings(True)
     return log_path
-
-
-def consume_virtual_residual_rng(in_chans_full: int, out_chans: int, hidden_dim: int = 32) -> None:
-    """Construct and discard R so controls can consume the same RNG as VirtualBandResidual."""
-    dummy_r = nn.Sequential(
-        nn.Conv2d(in_chans_full, hidden_dim, kernel_size=1),
-        nn.GELU(),
-        nn.Conv2d(hidden_dim, hidden_dim, kernel_size=1),
-        nn.GELU(),
-        nn.Conv2d(hidden_dim, out_chans, kernel_size=1),
-    )
-    nn.init.zeros_(dummy_r[-1].weight)
-    nn.init.zeros_(dummy_r[-1].bias)
-    del dummy_r
 
 
 def adapted_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
@@ -475,17 +440,17 @@ def active_lora_param_count(lora_backbone: NestedLoRABackbone, ranks: list[int] 
     return int(total)
 
 
-def residual_adapter_params(virt_res: nn.Module | None) -> list[nn.Parameter]:
-    if virt_res is None:
+def residual_adapter_params(bre: nn.Module | None) -> list[nn.Parameter]:
+    if bre is None:
         return []
-    adapter_parameters = getattr(virt_res, "adapter_parameters", None)
+    adapter_parameters = getattr(bre, "adapter_parameters", None)
     if callable(adapter_parameters):
         return list(adapter_parameters())
-    return list(virt_res.R.parameters())
+    return list(bre.R.parameters())
 
 
-def residual_init_norms(virt_res: nn.Module | None) -> dict[str, float | None]:
-    if virt_res is None:
+def residual_init_norms(bre: nn.Module | None) -> dict[str, float | None]:
+    if bre is None:
         return {
             "R0_weight_norm": None,
             "R2_weight_norm": None,
@@ -494,16 +459,16 @@ def residual_init_norms(virt_res: nn.Module | None) -> dict[str, float | None]:
             "router_entropy_mean": None,
         }
     info = {
-        "R0_weight_norm": tensor_norm(virt_res.R[0].weight),
-        "R2_weight_norm": tensor_norm(virt_res.R[2].weight),
-        "R4_weight_norm_after_zero_init": tensor_norm(virt_res.R[4].weight),
+        "R0_weight_norm": tensor_norm(bre.R[0].weight),
+        "R2_weight_norm": tensor_norm(bre.R[2].weight),
+        "R4_weight_norm_after_zero_init": tensor_norm(bre.R[4].weight),
     }
-    gate_logits = getattr(virt_res, "gate_logits", None)
+    gate_logits = getattr(bre, "gate_logits", None)
     if gate_logits is not None:
         info["gate_logits_norm"] = tensor_norm(gate_logits)
         info["router_logits_norm"] = None
         info["router_entropy_mean"] = None
-        gate_values = getattr(virt_res, "_gate_values", None)
+        gate_values = getattr(bre, "_gate_values", None)
         if callable(gate_values):
             gates = gate_values().detach().float()
             info.update({
@@ -520,7 +485,7 @@ def residual_init_norms(virt_res: nn.Module | None) -> dict[str, float | None]:
     else:
         info["gate_logits_norm"] = None
 
-    router_logits = getattr(virt_res, "router_logits", None)
+    router_logits = getattr(bre, "router_logits", None)
     if router_logits is not None:
         info["router_logits_norm"] = tensor_norm(router_logits)
         if router_logits.dim() >= 2:
@@ -528,7 +493,7 @@ def residual_init_norms(virt_res: nn.Module | None) -> dict[str, float | None]:
             entropy = -(weights * weights.clamp_min(1e-12).log()).sum(dim=1)
             info["router_entropy_mean"] = float(entropy.mean().item())
         else:
-            gate_values = getattr(virt_res, "_gate_values", None)
+            gate_values = getattr(bre, "_gate_values", None)
             if callable(gate_values):
                 gates = gate_values().detach().float()
                 info.update({
@@ -621,9 +586,6 @@ def class_ratios_from_counts(counts: torch.Tensor) -> list[float]:
 
 
 def load_backbone(backbone_name: str, n_classes: int, device: torch.device):
-    if "dinov2" in backbone_name:
-        from spectra.backbone.dinov2 import load_dinov2
-        return load_dinov2(backbone_name, n_classes, device)
     if backbone_name == "scalemae_fmow_rgb":
         from spectra.backbone.scalemae import load_scalemae
         return load_scalemae(backbone_name, n_classes, device)
@@ -655,95 +617,6 @@ def load_backbone(backbone_name: str, n_classes: int, device: torch.device):
         arch["feature_indices"],
     )
     return task.model.to(device)
-
-
-def wire_ssc_pe(model: nn.Module, ssc_pe: "SSCPE", backbone_name: str = "",
-                default_srf: "torch.Tensor | None" = None) -> None:
-    """Replace backbone patch embedding with SSC-PE so forward() uses it.
-
-    default_srf: if provided, used when srf_input is not passed explicitly (the
-    common case when the model is called as model(images) from train_epoch/evaluate).
-    """
-    if "dinov2" in backbone_name:
-        from spectra.backbone.dinov2 import wire_ssc_pe_dinov2
-        wire_ssc_pe_dinov2(model, ssc_pe)
-        return
-
-    # Prithvi / SatMAE path
-    encoder = model.encoder
-    # ssc_pe is captured in the closure below — do NOT assign to encoder
-    # (assigning would register it as a backbone submodule and get frozen by NestedLoRABackbone)
-
-    def patched_forward(x, srf_input=None, **kwargs):
-        _srf = srf_input if srf_input is not None else default_srf
-        if _srf is None:
-            raise ValueError("srf_input (SRF triples) required when SSC-PE is active.")
-        tokens = ssc_pe(x, _srf)               # (B, N, D)
-
-        # Build pos_embed for the token sequence
-        N = tokens.shape[1]
-        if hasattr(encoder, "pos_embed"):
-            pe = encoder.pos_embed             # (1, 1+N_pretrain, D)
-            # spatial pos_embed for patch tokens (skip CLS position 0)
-            tokens = tokens + pe[:, 1:N+1, :]
-
-        # Prepend CLS token with its positional encoding
-        if hasattr(encoder, "cls_token"):
-            cls_pe = encoder.pos_embed[:, :1, :] if hasattr(encoder, "pos_embed") else 0
-            cls = (encoder.cls_token + cls_pe).expand(tokens.shape[0], -1, -1)
-            tokens = torch.cat([cls, tokens], dim=1)    # (B, 1+N, D)
-
-        if hasattr(encoder, "pos_drop"):
-            tokens = encoder.pos_drop(tokens)
-
-        # Run all blocks and collect outputs — mirrors forward_features() behaviour
-        out = []
-        for block in encoder.blocks:
-            tokens = block(tokens)
-            out.append(tokens.clone())
-
-        if hasattr(encoder, "norm"):
-            out[-1] = encoder.norm(out[-1])
-
-        return out   # list[Tensor (B, 1+N, D)], same as forward_features()
-
-    # Warm-start band_patch_conv from the pretrained patch_embed's per-band mean.
-    # This ensures SSC-PE tokens start at the same scale/magnitude the frozen backbone expects.
-    pe = getattr(encoder, "patch_embed", None)
-    proj = getattr(pe, "proj", None) if pe is not None else None
-    if proj is not None and hasattr(proj, "weight"):
-        w = proj.weight  # (D, C, [T,] pH, pW) — may be 4D or 5D (Conv3d with T)
-        if w.shape[1] > 1:
-            mean_w = w.mean(dim=1, keepdim=True)        # (D, 1, [T,] pH, pW)
-            if mean_w.dim() == 5:
-                mean_w = mean_w[:, :, 0, :, :]          # drop temporal dim → (D, 1, pH, pW)
-            with torch.no_grad():
-                if mean_w.shape[-2:] != (ssc_pe.patch_size, ssc_pe.patch_size):
-                    mean_w = torch.nn.functional.interpolate(
-                        mean_w, size=(ssc_pe.patch_size, ssc_pe.patch_size), mode="bilinear")
-                ssc_pe.band_patch_conv.weight.copy_(mean_w)
-            logger.info("SSC-PE band_patch_conv warm-started from pretrained patch_embed (mean of %d bands)", w.shape[1])
-
-    encoder.forward_features = patched_forward
-    encoder.forward = patched_forward
-    logger.info("SSC-PE wired into backbone encoder (in_chans=%d → embed_dim=%d)",
-                ssc_pe.in_chans, ssc_pe.embed_dim)
-
-
-def wire_band_projector(model: nn.Module, projector: BandProjectorMLP) -> None:
-    """Prepend BandProjectorMLP to encoder.forward so the pretrained patch_embed
-    receives a pretrained-compatible band map instead of the raw C_in-band input.
-    """
-    encoder = model.encoder
-    orig_fwd = encoder.forward_features
-
-    def patched_forward(x, **kwargs):
-        return orig_fwd(projector(x), **kwargs)
-
-    encoder.forward_features = patched_forward
-    encoder.forward = patched_forward
-    logger.info("BandProjectorMLP wired: %dB → pretrained-compatible bands (hidden=%d)",
-                projector.net[0].in_channels, projector.net[0].out_channels)
 
 
 def wire_band_selector(model: nn.Module, selector: BandSelector) -> None:
@@ -786,8 +659,8 @@ def build_dataloader(
     )
 
 
-def _load_mgas_stage_params(backbone_name: str, spec) -> tuple:
-    """Load per-stage timing from timing_pass.py JSON for MGAS budget planning.
+def _load_stage_costs(backbone_name: str, spec) -> tuple:
+    """Load per-stage timing from timing_pass.py JSON for ST-LoRA budget planning.
 
     Returns (stage_dims, stage_n_params, t_lora, t_full).
     t_lora and t_full are derived from aggregate measurements (not per-stage sums)
@@ -874,73 +747,6 @@ class DiceLoss(nn.Module):
             denom = pred.sum() + truth.sum()
             dice = (2.0 * inter + self.smooth) / (denom + self.smooth)
             losses.append(1.0 - dice)
-
-        if not losses:
-            return logits.sum() * 0.0
-        return torch.stack(losses).mean()
-
-
-def lovasz_grad(gt_sorted: torch.Tensor) -> torch.Tensor:
-    """Gradient of the Lovasz extension with respect to sorted errors."""
-    p = gt_sorted.numel()
-    gts = gt_sorted.sum()
-    intersection = gts - gt_sorted.float().cumsum(0)
-    union = gts + (1.0 - gt_sorted).float().cumsum(0)
-    jaccard = 1.0 - intersection / union.clamp_min(1e-6)
-    if p > 1:
-        jaccard[1:p] = jaccard[1:p] - jaccard[0:-1]
-    return jaccard
-
-
-class LovaszSoftmaxLoss(nn.Module):
-    """Lovasz-Softmax loss for segmentation logits.
-
-    This follows the reference Lovasz-Softmax formulation: apply softmax,
-    remove ignore pixels, flatten to P x C, sort absolute class errors, then
-    dot them with the Lovasz gradient. When class_mask selects foreground only,
-    all-background batches still penalize false positive foreground probability.
-    """
-
-    def __init__(
-        self,
-        ignore_index: int = -1,
-        include_background: bool = False,
-        class_mask: torch.Tensor | list[bool] | None = None,
-    ) -> None:
-        super().__init__()
-        self.ignore_index = ignore_index
-        self.include_background = include_background
-        self.class_mask = class_mask
-
-    def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        probs = torch.softmax(logits, dim=1)
-        valid = target != self.ignore_index
-        if not bool(valid.any()):
-            return logits.sum() * 0.0
-
-        n_classes = probs.shape[1]
-        if self.class_mask is None:
-            class_mask = torch.ones(n_classes, dtype=torch.bool, device=logits.device)
-        else:
-            class_mask = torch.as_tensor(
-                self.class_mask, dtype=torch.bool, device=logits.device
-            ).clone()
-            if class_mask.numel() != n_classes:
-                raise ValueError(
-                    f"Lovasz class_mask has {class_mask.numel()} entries, expected {n_classes}"
-                )
-        if not self.include_background and n_classes > 1:
-            class_mask[0] = False
-
-        probs_flat = probs.permute(0, 2, 3, 1).contiguous()[valid]
-        labels_flat = target[valid]
-        losses = []
-        for cls in class_mask.nonzero(as_tuple=False).flatten().tolist():
-            foreground = (labels_flat == cls).float()
-            errors = (foreground - probs_flat[:, cls]).abs()
-            errors_sorted, perm = torch.sort(errors, dim=0, descending=True)
-            foreground_sorted = foreground[perm]
-            losses.append(torch.dot(errors_sorted, lovasz_grad(foreground_sorted)))
 
         if not losses:
             return logits.sum() * 0.0
@@ -1164,7 +970,7 @@ def optimizer_group_lr(optimizer: torch.optim.Optimizer, group_name: str) -> flo
 
 def configure_residual_stage(
     epoch_idx: int,
-    virt_res: VirtualBandResidual | None,
+    bre: BRE | None,
     optimizer: torch.optim.Optimizer,
     force_residual_zero: bool,
     stage1_epochs: int,
@@ -1172,12 +978,12 @@ def configure_residual_stage(
     default_residual_lr: float,
     ramp_epochs: int,
 ) -> dict:
-    if virt_res is None:
+    if bre is None:
         return {}
 
     if epoch_idx < stage1_epochs:
-        virt_res.force_delta_zero = True
-        virt_res.residual_scale = 0.0
+        bre.force_delta_zero = True
+        bre.residual_scale = 0.0
         set_optimizer_group_lr(optimizer, "residual_R", 0.0)
         return {
             "residual_stage": "bandsel",
@@ -1186,14 +992,14 @@ def configure_residual_stage(
         }
 
     stage2_epoch = epoch_idx - stage1_epochs
-    virt_res.force_delta_zero = force_residual_zero
+    bre.force_delta_zero = force_residual_zero
     if force_residual_zero:
         gamma = 0.0
     elif ramp_epochs > 0:
         gamma = min(1.0, float(stage2_epoch + 1) / float(ramp_epochs))
     else:
         gamma = 1.0
-    virt_res.residual_scale = gamma
+    bre.residual_scale = gamma
 
     active_lr = stage2_lr_residual if stage2_lr_residual is not None else default_residual_lr
     set_optimizer_group_lr(optimizer, "residual_R", active_lr)
@@ -1508,138 +1314,24 @@ def main() -> None:
     # Build model components
     model = load_backbone(backbone_name, n_classes, device)
 
-    # Method suffix _sscpe / _mlp overrides config flags for clean per-run naming.
-    # Base method (without suffix) is used for schedule dispatch below.
-    if args.method.endswith("_sscpe"):
-        use_ssc_pe   = True
-        use_mlp_proj = False
-        use_band_select = False
-        use_dual_patch = False
-        use_virtual_residual = False
-        _sched_method = args.method[:-len("_sscpe")]
-    elif args.method.endswith("_mlp"):
-        use_ssc_pe   = False
-        use_mlp_proj = True
-        use_band_select = False
-        use_dual_patch = False
-        use_virtual_residual = False
-        _sched_method = args.method[:-len("_mlp")]
-    elif args.method.endswith("_bandsel"):
-        use_ssc_pe   = False
-        use_mlp_proj = False
+    # Public methods use native input, band selection baselines, or BRE.
+    if args.method.endswith("_bandsel"):
         use_band_select = True
-        use_dual_patch = False
-        use_virtual_residual = False
+        use_bre = False
         _sched_method = args.method[:-len("_bandsel")]
-    elif args.method.endswith("_dual"):
-        # Diagnostic: bandsel main path + auxiliary new patch_embed on all bands,
-        # combined by a zero-init per-channel gate. See dual_patch_embed.py.
-        use_ssc_pe   = False
-        use_mlp_proj = False
-        use_band_select = False        # dual_pe does the selection internally
-        use_dual_patch = True
-        use_virtual_residual = False
-        _sched_method = args.method[:-len("_dual")]
-    elif args.method.endswith("_router_static_all"):
-        # Static band-contribution router over all observed bands, followed by
-        # a zero-init residual correction in selected-band space.
-        use_ssc_pe = False; use_mlp_proj = False; use_band_select = False
-        use_dual_patch = False; use_virtual_residual = True
-        virtual_residual_mode = "router_static_all"
-        _sched_method = args.method[:-len("_router_static_all")]
-    elif args.method.endswith("_bre_anchor_all"):
-        # Static all-band BRE with selected-band anchor initialization.
-        use_ssc_pe = False; use_mlp_proj = False; use_band_select = False
-        use_dual_patch = False; use_virtual_residual = True
-        virtual_residual_mode = "bre_anchor_all"
-        _sched_method = args.method[:-len("_bre_anchor_all")]
-    elif args.method.endswith("_bre_gatedD"):
-        # D-style all-band residual with learned source-band gates.
-        use_ssc_pe = False; use_mlp_proj = False; use_band_select = False
-        use_dual_patch = False; use_virtual_residual = True
-        virtual_residual_mode = "bre_gatedD"
-        _sched_method = args.method[:-len("_bre_gatedD")]
-    elif args.method.endswith("_bre_light_gate"):
-        # D-style all-band residual with learned per-output residual gates.
-        use_ssc_pe = False; use_mlp_proj = False; use_band_select = False
-        use_dual_patch = False; use_virtual_residual = True
-        virtual_residual_mode = "bre_light_gate"
-        _sched_method = args.method[:-len("_bre_light_gate")]
-    elif args.method.endswith("_bre_perout_gate"):
-        # D-style all-band residual with per-output learned source-band gates.
-        use_ssc_pe = False; use_mlp_proj = False; use_band_select = False
-        use_dual_patch = False; use_virtual_residual = True
-        virtual_residual_mode = "bre_perout_gate"
-        _sched_method = args.method[:-len("_bre_perout_gate")]
-    elif args.method.endswith("_bre_s2t"):
-        # Source-to-target gated residual: every virtual target band has its
-        # own source-band gate and grouped target-wise adapter.
-        use_ssc_pe = False; use_mlp_proj = False; use_band_select = False
-        use_dual_patch = False; use_virtual_residual = True
-        virtual_residual_mode = "bre_s2t"
-        _sched_method = args.method[:-len("_bre_s2t")]
-    elif args.method.endswith("_resB"):
-        # Virtual-band residual, mask="extra" — R sees only extra bands.
-        use_ssc_pe = False; use_mlp_proj = False; use_band_select = False
-        use_dual_patch = False; use_virtual_residual = True
-        virtual_residual_mode = "extra"
-        _sched_method = args.method[:-len("_resB")]
-    elif args.method.endswith("_resC"):
-        # Virtual-band residual, mask="selected" — R sees only selected bands
-        # (parameter-matched control for B).
-        use_ssc_pe = False; use_mlp_proj = False; use_band_select = False
-        use_dual_patch = False; use_virtual_residual = True
-        virtual_residual_mode = "selected"
-        _sched_method = args.method[:-len("_resC")]
-    elif args.method.endswith("_resD"):
-        # Virtual-band residual, mask="all" — R sees all bands. Tests whether
-        # modeling selected/extra spectral relationships helps.
-        use_ssc_pe = False; use_mlp_proj = False; use_band_select = False
-        use_dual_patch = False; use_virtual_residual = True
-        virtual_residual_mode = "all"
-        _sched_method = args.method[:-len("_resD")]
-    elif args.method.endswith("_resE"):
-        # Virtual-band residual, mask="shuffle_extra" — R sees all bands but
-        # the extra channels are shuffled along the batch dim (random at
-        # train, deterministic at eval). Negative control for D: tests whether
-        # D's gain is from real extra-band info or from extra parameters.
-        use_ssc_pe = False; use_mlp_proj = False; use_band_select = False
-        use_dual_patch = False; use_virtual_residual = True
-        virtual_residual_mode = "shuffle_extra"
-        _sched_method = args.method[:-len("_resE")]
-    else:
-        use_ssc_pe   = cfg.get("use_ssc_pe",   True)
-        use_mlp_proj = cfg.get("use_mlp_proj", False)
+    elif args.method.endswith("_bre"):
         use_band_select = False
-        use_dual_patch = False
-        use_virtual_residual = False
+        use_bre = True
+        _sched_method = args.method[:-len("_bre")]
+    else:
+        use_band_select = False
+        use_bre = False
         _sched_method = args.method
 
-    ssc_pe_cfg = cfg.get("ssc_pe", {})
-    ssc_pe = None
-    if use_ssc_pe:
-        ssc_pe = SSCPE(
-            in_chans  = band_cfg.in_chans,
-            embed_dim = ssc_pe_cfg.get("embed_dim", spec.embed_dim),
-            patch_size= ssc_pe_cfg.get("patch_size", spec.patch_size),
-            srf_dim   = ssc_pe_cfg.get("srf_dim", 64),
-            mixer_rank= ssc_pe_cfg.get("mixer_rank", 16),
-            use_gate  = ssc_pe_cfg.get("use_gate", True),
-        ).to(device)
-
-    band_proj = None
-    if use_mlp_proj:
-        mlp_cfg   = cfg.get("mlp_projector", {})
-        pretrain_sensor = BACKBONE_PRETRAIN_SENSOR.get(backbone_name, "fire_scars")
-        band_proj = BandProjectorMLP(
-            in_chans   = band_cfg.in_chans,
-            out_chans  = len(get_srf(pretrain_sensor)),
-            hidden_dim = mlp_cfg.get("hidden_dim", 32),
-        ).to(device)
-
+    band_selector = None
     band_selector = None
     bandsel_indices = None
-    if use_band_select or use_dual_patch or use_virtual_residual:
+    if use_band_select or use_bre:
         # Pick the C_pretrain bands of the target sensor whose central wavelengths
         # are closest to the pre-training sensor's bands.
         from spectra.data.srf import select_closest_bands, get_srf
@@ -1648,14 +1340,13 @@ def main() -> None:
         ref_wavelengths = [b.center_nm for b in pretrain_bands]
         bandsel_indices = select_closest_bands(band_cfg.sensor_key, ref_wavelengths)
         if (
-            use_virtual_residual
-            and virtual_residual_mode == "bre_perout_gate"
+            use_bre
             and len(bandsel_indices) == band_cfg.in_chans
             and list(bandsel_indices) == list(range(band_cfg.in_chans))
         ):
-            use_virtual_residual = False
+            use_bre = False
             use_band_select = False
-            virtual_residual_mode = "native"
+            bre_mode = "native"
             logger.info("BRE bypassed: target bands exactly match the pretrained patch embedding input; using native patch_embed + ST-LoRA.")
 
     if use_band_select:
@@ -1663,195 +1354,40 @@ def main() -> None:
         logger.info("BandSelector: pretrain_sensor=%s ref_λ=%s → target_sensor=%s indices=%s",
                     pretrain_sensor, ref_wavelengths, band_cfg.sensor_key, bandsel_indices)
 
-    dual_pe = None
-    if use_dual_patch:
-        # Wrap the encoder's pretrained patch_embed in a DualPatchEmbed that
-        # routes selected bands through the original frozen layer and ALL bands
-        # through a fresh aux Conv2d, combining the two via a zero-init gate.
-        original_pe = model.encoder.patch_embed
-        dual_pe = DualPatchEmbed(
-            original_patch_embed=original_pe,
-            band_indices=bandsel_indices,
-            in_chans_full=band_cfg.in_chans,
-            embed_dim=spec.embed_dim,
-            patch_size=spec.patch_size,
-        ).to(device)
-        model.encoder.patch_embed = dual_pe
-        logger.info("DualPatchEmbed wired: aux=%dB → %dD, gate dim=%d (init L2=%.4f), "
-                    "indices=%s",
-                    band_cfg.in_chans, spec.embed_dim,
-                    dual_pe.gate.numel(), dual_pe.gate_l2, bandsel_indices)
-
-    virt_res = None
-    if use_virtual_residual:
-        # Virtual-band residual: x_virt = x_sel + R(masked_x); pretrained patch_embed
-        # is the ONLY tokenizer. R maps C_in→32→32→C_pretrain; final layer is
-        # zero-init so the step-0 output is exactly the bandsel-only baseline.
+    bre = None
+    bre_mode = "bre" if use_bre else "native"
+    if use_bre:
         set_all_seeds(residual_seed)
         original_pe = model.encoder.patch_embed
         extra_idx = [i for i in range(band_cfg.in_chans) if i not in bandsel_indices]
-        if virtual_residual_mode == "router_static_all":
-            virt_res = BandContributionRouterResidual(
-                original_patch_embed=original_pe,
-                selected_idx=bandsel_indices,
-                candidate_idx=list(range(band_cfg.in_chans)),
-                in_chans_full=band_cfg.in_chans,
-                hidden_dim=cfg.get("vres_hidden_dim", 32),
-            ).to(device)
-        elif virtual_residual_mode == "bre_anchor_all":
-            virt_res = BandContributionRouterResidual(
-                original_patch_embed=original_pe,
-                selected_idx=bandsel_indices,
-                candidate_idx=list(range(band_cfg.in_chans)),
-                in_chans_full=band_cfg.in_chans,
-                hidden_dim=cfg.get("vres_hidden_dim", 32),
-                router_init="anchor",
-                anchor_logit=float(cfg.get("bre_anchor_logit", 4.0)),
-            ).to(device)
-            virt_res.mask_mode = "bre_anchor_all"
-        elif virtual_residual_mode == "bre_gatedD":
-            virt_res = BandGatedResidual(
-                original_patch_embed=original_pe,
-                selected_idx=bandsel_indices,
-                in_chans_full=band_cfg.in_chans,
-                hidden_dim=cfg.get("vres_hidden_dim", 32),
-                gate_max=float(cfg.get("bre_gate_max", 2.0)),
-            ).to(device)
-        elif virtual_residual_mode == "bre_light_gate":
-            virt_res = LightweightResidualGate(
-                original_patch_embed=original_pe,
-                selected_idx=bandsel_indices,
-                in_chans_full=band_cfg.in_chans,
-                hidden_dim=cfg.get("vres_hidden_dim", 32),
-                gate_max=float(cfg.get("bre_gate_max", 2.0)),
-            ).to(device)
-        elif virtual_residual_mode == "bre_perout_gate":
-            virt_res = BandPerOutputGatedResidual(
-                original_patch_embed=original_pe,
-                selected_idx=bandsel_indices,
-                in_chans_full=band_cfg.in_chans,
-                hidden_dim=cfg.get("vres_hidden_dim", 32),
-                gate_max=float(cfg.get("bre_gate_max", 2.0)),
-            ).to(device)
-        elif virtual_residual_mode == "bre_s2t":
-            virt_res = BandSourceToTargetGatedResidual(
-                original_patch_embed=original_pe,
-                selected_idx=bandsel_indices,
-                in_chans_full=band_cfg.in_chans,
-                hidden_dim=cfg.get("vres_hidden_dim", 32),
-                gate_max=float(cfg.get("bre_gate_max", 2.0)),
-            ).to(device)
-        else:
-            virt_res = VirtualBandResidual(
-                original_patch_embed=original_pe,
-                selected_idx=bandsel_indices,
-                extra_idx=extra_idx,
-                mask_mode=virtual_residual_mode,
-                in_chans_full=band_cfg.in_chans,
-                hidden_dim=cfg.get("vres_hidden_dim", 32),
-            ).to(device)
-        virt_res.force_delta_zero = args.force_residual_zero
-        # Explicit shuffle seeds (only meaningful for mask_mode='shuffle_extra' /
-        # any eval-time 'shuffle_extra' corruption). Always set so they're logged.
-        virt_res.eval_shuffle_seed = int(eval_shuffle_seed)
-        virt_res.set_train_shuffle_seed(int(train_shuffle_seed))
-        model.encoder.patch_embed = virt_res
-        n_r_params = sum(p.numel() for p in residual_adapter_params(virt_res))
-        logger.info(
-            "%s wired: mask_mode=%s  adapter params=%d  selected=%s  extra=%s  force_delta_zero=%s  train_shuffle_seed=%s  eval_shuffle_seed=%s",
-            virt_res.__class__.__name__,
-            virtual_residual_mode, n_r_params, bandsel_indices, extra_idx,
-            virt_res.force_delta_zero, virt_res.train_shuffle_seed, virt_res.eval_shuffle_seed,
-        )
-
-    # --- DEFLECT: separate code path (no SSC-PE, no nested LoRA) ---
-    if args.method == "deflect":
-        n_head_reset = reset_task_head(model, head_seed)
-        logger.info("Task head reset with head_seed=%d (%d modules)", head_seed, n_head_reset)
-        pretrain_sensor = BACKBONE_PRETRAIN_SENSOR.get(backbone_name, "fire_scars")
-        deflect_cfg = cfg.get("deflect", {})
-        deflect_model = DEFLECTAdapter(
-            backbone            = model.encoder,
-            sensor_key          = band_cfg.sensor_key,
-            pretrain_sensor_key = pretrain_sensor,
-            embed_dim           = spec.embed_dim,
-            patch_size          = spec.patch_size,
-            num_heads           = deflect_cfg.get("num_heads", 16),
-            hidden_dim          = deflect_cfg.get("hidden_dim", 16),
-            unfreeze            = deflect_cfg.get("unfreeze", []),
+        bre = BRE(
+            original_patch_embed=original_pe,
+            selected_idx=bandsel_indices,
+            in_chans_full=band_cfg.in_chans,
+            hidden_dim=cfg.get("vres_hidden_dim", 32),
+            gate_max=float(cfg.get("bre_gate_max", 2.0)),
         ).to(device)
-
-        train_loader = build_dataloader(dataset, "train", cfg, loader_seed, split_seed)
-        val_loader   = build_dataloader(dataset, "val",   cfg, loader_seed, split_seed)
-        t_start = time.time()
-
-        optimizer = torch.optim.AdamW(
-            deflect_model.trainable_params(),
-            lr=cfg.get("lr_adapter", 1e-4),
-            weight_decay=cfg.get("weight_decay", 0.05),
+        bre.force_delta_zero = args.force_residual_zero
+        bre.eval_shuffle_seed = int(eval_shuffle_seed)
+        bre.set_train_shuffle_seed(int(train_shuffle_seed))
+        model.encoder.patch_embed = bre
+        n_r_params = sum(p.numel() for p in residual_adapter_params(bre))
+        logger.info(
+            "BRE wired: adapter params=%d selected=%s extra=%s force_delta_zero=%s train_shuffle_seed=%s eval_shuffle_seed=%s",
+            n_r_params, bandsel_indices, extra_idx, bre.force_delta_zero,
+            bre.train_shuffle_seed, bre.eval_shuffle_seed,
         )
-        criterion = torch.nn.CrossEntropyLoss(ignore_index=-1)
-        schedule_info = {"method": "deflect",
-                         "adapter_layers": list(deflect_model.adapter_layers),
-                         "n_indices": len(deflect_model.spectral_index.active_indices)}
 
-        if args.use_wandb or cfg.get("use_wandb", False):
-            import wandb
-            wandb.init(project=cfg.get("wandb_project", "SPECTRA"),
-                       config={**cfg, **schedule_info, "seed": seed, "method": args.method})
+    # --- : separate code path (no adapter, no nested LoRA) ---
+    # --- NestedLoRA path ---
 
-        best_metric = 0.0
-        for epoch in range(cfg.get("epochs", 10)):
-            loss, _ = train_epoch(deflect_model, train_loader, optimizer, criterion, device)
-            metric = evaluate(deflect_model, val_loader, cfg.get("eval_metric", "miou"), device)
-            best_metric = max(best_metric, metric)
-            logger.info("Epoch %d/%d  loss=%.4f  %s=%.4f",
-                        epoch + 1, cfg["epochs"], loss, cfg["eval_metric"], metric)
 
-        gpu_h = (time.time() - t_start) / 3600
-        result = {
-            "run_id": run_id, "dataset": dataset, "backbone": backbone_name,
-            "method": getattr(args, "public_method", args.method), "seed": seed,
-            "seed_protocol": resolved_seed_protocol,
-            cfg.get("eval_metric", "miou"): best_metric,
-            "gpu_h": round(gpu_h, 3),
-            "log_path": str(log_path),
-            **schedule_info,
-        }
-        out_dir = RESULTS_DIR / "finetune"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / f"{run_id}.json").write_text(json.dumps(result, indent=2))
-        logger.info("Result saved → %s/%s.json", out_dir, run_id)
-        return
-
-    # --- All other methods: NestedLoRA path (+ optional SSC-PE) ---
-
-    if use_ssc_pe:
-        wire_ssc_pe(model, ssc_pe, backbone_name, default_srf=srf_triples)
-    elif use_mlp_proj:
-        wire_band_projector(model, band_proj)
-    elif use_band_select:
+    if use_band_select:
         wire_band_selector(model, band_selector)
-    elif use_dual_patch:
-        logger.info("DualPatchEmbed already replaced encoder.patch_embed; aux_proj+gate will be added to optimizer below")
-    elif use_virtual_residual:
-        logger.info("Virtual residual/router already replaced encoder.patch_embed; adapter params will be added to optimizer below")
+    elif use_bre:
+        logger.info("BRE already replaced encoder.patch_embed; adapter params will be added to optimizer below")
     else:
         logger.info("No input adapter — using native backbone patch_embed")
-
-    if args.consume_residual_rng:
-        out_chans = len(bandsel_indices) if bandsel_indices is not None else 6
-        consume_virtual_residual_rng(
-            in_chans_full=band_cfg.in_chans,
-            out_chans=out_chans,
-            hidden_dim=cfg.get("vres_hidden_dim", 32),
-        )
-        logger.info(
-            "Consumed dummy VirtualBandResidual RNG: in_chans=%d hidden=%d out_chans=%d",
-            band_cfg.in_chans,
-            cfg.get("vres_hidden_dim", 32),
-            out_chans,
-        )
 
     lora_cfg = cfg.get("lora", {})
     if args.max_rank is not None:
@@ -1888,25 +1424,14 @@ def main() -> None:
     n_head_reset = reset_task_head(model, head_seed)
     logger.info("Task head reset with head_seed=%d (%d modules)", head_seed, n_head_reset)
 
-    # NestedLoRABackbone freezes every backbone parameter, including the dual-path
-    # aux Conv2d and gate that live inside encoder.patch_embed. Re-enable training
-    # for the auxiliary path only; the wrapped pretrained patch_embed stays frozen.
-    if use_dual_patch and dual_pe is not None:
-        for p in dual_pe.aux_proj.parameters():
-            p.requires_grad_(True)
-        dual_pe.gate.requires_grad_(True)
-        logger.info("DualPatchEmbed: re-enabled grads on aux_proj (%d params) + gate (%d params)",
-                    sum(p.numel() for p in dual_pe.aux_proj.parameters()),
-                    dual_pe.gate.numel())
-
-    if use_virtual_residual and virt_res is not None:
+    if use_bre and bre is not None:
         r_trainable = not args.freeze_residual
-        adapter_params_for_grad = residual_adapter_params(virt_res)
+        adapter_params_for_grad = residual_adapter_params(bre)
         for p in adapter_params_for_grad:
             p.requires_grad_(r_trainable)
         logger.info(
             "%s: adapter trainable=%s (%d params)",
-            virt_res.__class__.__name__,
+            bre.__class__.__name__,
             r_trainable,
             sum(p.numel() for p in adapter_params_for_grad),
         )
@@ -1964,7 +1489,7 @@ def main() -> None:
     t_start = time.time()
 
     if _sched_method == "spectra" and args.ranks is not None:
-        # Manual-plan override: skip MGAS profiling and apply the provided ranks/unfrozen.
+        # Manual-plan override: skip STPlanner profiling and apply the provided ranks/unfrozen.
         # Use case: replay the plan from a previous SPECTRA run with a different adapter,
         # or sidestep planner failure modes (e.g., random MLP front-end producing useless Δq).
         plan_ranks = [int(r.strip()) for r in args.ranks.split(",")]
@@ -1977,240 +1502,95 @@ def main() -> None:
                 f"Manual planned rank {max(plan_ranks)} exceeds LoRA max_rank={effective_max_rank}. "
                 "Use --max-rank at least as large as the planned rank."
             )
-        logger.info("Manual-plan override (skipping MGAS): ranks=%s unfrozen=%s",
+        logger.info("Manual-plan override (skipping STPlanner): ranks=%s unfrozen=%s",
                     plan_ranks, plan_unfrozen)
         lora_backbone.apply_schedule(plan_ranks, plan_unfrozen, fix_train_rank=True)
         schedule_info = {"method": getattr(args, "public_method", args.method), "ranks": plan_ranks, "unfrozen": plan_unfrozen,
                          "plan_source": "manual_override"}
 
     elif _sched_method == "spectra":
-        # Phase 2: SSC-PE warm-up (if use_ssc_pe) + MGAS profiling
-        mgas_cfg_dict = cfg.get("mgas", {})
-        mgas_kwargs = dict(
-            epsilon     = mgas_cfg_dict.get("epsilon", 0.02),
-            delta       = mgas_cfg_dict.get("delta", 0.01),
-            b_param     = mgas_cfg_dict.get("b_param", 0.50),
-            b_gpu       = mgas_cfg_dict.get("b_gpu", 0.50),
-            unfreeze_min_delta_q = mgas_cfg_dict.get("unfreeze_min_delta_q", 0.25),
-            min_rank    = mgas_cfg_dict.get("min_rank", 0),
-        )
-        if args.mgas_b_param is not None:
-            mgas_kwargs["b_param"] = args.mgas_b_param
-        if args.mgas_b_gpu is not None:
-            mgas_kwargs["b_gpu"] = args.mgas_b_gpu
-        if args.mgas_min_rank is not None:
-            mgas_kwargs["min_rank"] = args.mgas_min_rank
-        if args.mgas_unfreeze_min_delta_q is not None:
-            mgas_kwargs["unfreeze_min_delta_q"] = args.mgas_unfreeze_min_delta_q
-        if args.mgas_disable_unfreeze:
-            mgas_kwargs["unfreeze_min_delta_q"] = float("inf")
-        # CLI override: --rank-grid sets staircase output ranks; --staircase-thresholds sets the Δq cuts.
-        if rank_grid is not None:
-            mgas_kwargs["staircase_ranks"] = tuple(rank_grid)
-            mgas_kwargs["rank_steps"]      = tuple(rank_grid)
-        if args.staircase_thresholds is not None:
-            mgas_kwargs["staircase_thresholds"] = tuple(
-                float(x.strip()) for x in args.staircase_thresholds.split(",")
-            )
-        mgas_config = MGASConfig(**mgas_kwargs)
-        logger.info("MGASConfig staircase: thresholds=%s → ranks=%s (min_rank=%d, b_param=%.2f, b_gpu=%.2f, unfreeze_min_delta_q=%s)",
-                    mgas_config.staircase_thresholds, mgas_config.staircase_ranks,
-                    mgas_config.min_rank, mgas_config.b_param, mgas_config.b_gpu,
-                    "inf" if mgas_config.unfreeze_min_delta_q == float("inf") else f"{mgas_config.unfreeze_min_delta_q:.4f}")
+        planner_cfg = cfg.get("stlora", {})
         profiler = StagewiseLogMEProfiler(
-            lora_backbone  = lora_backbone,
-            patch_size     = spec.patch_size,
-            purity_tau     = mgas_cfg_dict.get("purity_tau", 0.8),
-            n_probe_images = mgas_cfg_dict.get("n_probe_images", 1000),
+            lora_backbone=lora_backbone,
+            patch_size=spec.patch_size,
+            purity_tau=planner_cfg.get("purity_tau", 0.8),
+            n_probe_images=planner_cfg.get("n_probe_images", 1000),
         )
-
-        if use_ssc_pe:
-            # Warm-up SSC-PE with stopping rule before profiling.
-            # Use the full model (encoder + decoder) for supervised warm-up so we
-            # don't need image-level label conversion — segmentation loss works directly.
-            #
-            # Warmup trains SSC-PE + head WITHOUT LoRA. Including LoRA in warmup
-            # creates a LoRA-dependent SSC-PE state that breaks main training when
-            # MGAS assigns rank=0 (LoRA disabled). SSC-PE must adapt in the same
-            # LoRA-free context it will see during main training.
-            #
-            # Warmup uses the same class weights as main training. Without class weights,
-            # the warmup converges to all-majority-class on imbalanced datasets (frozen
-            # backbone + uniform CE → trivial predictor), strongly biasing SSC-PE and
-            # preventing convergence during main training.
-            warmup_cw_cfg = cfg.get("class_weights", None)
-            if warmup_cw_cfg == "auto":
-                _wm_counts = split_label_counts["train"]
-                warmup_cw = _wm_counts.sum() / (n_classes * _wm_counts.clamp(min=1))
-                # Always apply 2× minority boost during warmup (backbone is frozen,
-                # but SSC-PE still needs the push to avoid all-background convergence).
-                if n_classes == 2:
-                    _min = int(_wm_counts.argmin().item())
-                    _maj = 1 - _min
-                    warmup_cw[_min] = min(warmup_cw[_min] * 2.0, 4.0 * warmup_cw[_maj])
-                logger.info("Warmup class weights: %s", warmup_cw.tolist())
-                warmup_criterion = torch.nn.CrossEntropyLoss(weight=warmup_cw.to(device), ignore_index=-1)
-            elif isinstance(warmup_cw_cfg, list):
-                warmup_cw = torch.tensor(warmup_cw_cfg, dtype=torch.float32)
-                warmup_criterion = torch.nn.CrossEntropyLoss(weight=warmup_cw.to(device), ignore_index=-1)
-            else:
-                warmup_criterion = torch.nn.CrossEntropyLoss(ignore_index=-1)
-            warmup_opt = torch.optim.AdamW([
-                {"params": list(ssc_pe.parameters()), "lr": cfg.get("lr_ssc_pe", 1e-3)},
-                {"params": head_params,               "lr": cfg.get("lr_head",   1e-3)},
-            ], weight_decay=cfg.get("weight_decay", 0.05))
-
-            def warmup_train_fn(images, labels):
-                model.train()
-                outputs = model(images)
-                if hasattr(outputs, "output"):
-                    outputs = outputs.output
-                elif isinstance(outputs, (list, tuple)):
-                    outputs = outputs[-1]
-                return warmup_criterion(outputs, labels.long())
-
-            logger.info("Running SSC-PE warm-up + LogME profiling...")
-            profile = profiler.run(train_loader, warmup_opt, train_fn=warmup_train_fn)
-        else:
-            # Same-sensor cell: no SSC-PE to warm up.
-            # Profile the pretrained backbone directly.
-            logger.info("Profiling pretrained backbone (no SSC-PE warm-up)...")
-            profile = profiler.profile_only(train_loader)
-
+        logger.info("Profiling pretrained backbone for STPlanner...")
+        profile = profiler.profile_only(train_loader)
         logger.info("LogME profile q[s]: %s", [f"{q:.4f}" for q in profile.scores])
         logger.info("Δq[s]: %s",              [f"{dq:.4f}" for dq in profile.delta_q()])
         logger.info("Precondition OK: %s", profile.precondition_ok)
 
-        stage_dims, stage_n_params, t_lora, t_full = _load_mgas_stage_params(backbone_name, spec)
-        if args.star_planner == "mgas":
-            planner = MGASPlanner(config=mgas_config)
-            plan = planner.plan(profile, spec.embed_dim, stage_dims, stage_n_params, t_lora, t_full)
-            # fix_train_rank=True: MGAS selects per-stage ranks before training, so stochastic
-            # rank sampling (rank 0/4/8/16 per minibatch) is unnecessary and harmful — 25% of
-            # batches sample rank=0 giving zero LoRA gradient, causing ±0.07 mIoU oscillation.
-            if max(plan.ranks, default=0) > effective_max_rank:
-                raise ValueError(
-                    f"Planned rank {max(plan.ranks)} exceeds LoRA max_rank={effective_max_rank}. "
-                    "Use --max-rank at least as large as the planned rank."
-                )
-            lora_backbone.apply_schedule(plan.ranks, plan.unfrozen, fix_train_rank=True)
-            schedule_info = {
-                "method": getattr(args, "public_method", args.method),
-                "schedule_method": "spectra",
-                "plan_source": "mgas",
-                "ranks": plan.ranks,
-                "unfrozen": plan.unfrozen,
-                "suffix_cut": plan.suffix_cut,
-                "precondition_ok": plan.precondition_ok,
-                "budget_reduced": plan.budget_reduced,
-                "profile_scores": [round(q, 6) for q in profile.scores],
-                "delta_q": [round(dq, 6) for dq in plan.delta_q],
-                "profile_n_patches_used": profile.n_patches_used,
-                "profile_used_fallback": profile.used_fallback,
-                "profile_stopped_at": profile.stopped_at,
-                "mgas_param_fraction": plan.param_fraction,
-                "mgas_gpu_fraction": plan.gpu_fraction,
-                "mgas_config": {
-                    "epsilon": mgas_config.epsilon,
-                    "delta": mgas_config.delta,
-                    "b_param": mgas_config.b_param,
-                    "b_gpu": mgas_config.b_gpu,
-                    "min_rank": mgas_config.min_rank,
-                    "unfreeze_min_delta_q": mgas_config.unfreeze_min_delta_q,
-                    "staircase_thresholds": list(mgas_config.staircase_thresholds),
-                    "staircase_ranks": list(mgas_config.staircase_ranks),
-                },
-            }
-        else:
-            star_stage_prior = tuple(float(x.strip()) for x in args.star_stage_prior.split(","))
-            star_budget_candidates = tuple(int(x.strip()) for x in args.star_budget_candidates.split(","))
-            star_config = STPlannerConfig(
-                strategy=args.star_planner,
-                reference_rank=args.star_reference_rank,
-                tau=args.star_tau,
-                stage_prior=star_stage_prior,
-                rank_grid=(4, 8, 16, 32, 64),
-                candidate_budgets=star_budget_candidates,
-                min_rank=4,
-                budget_f_min=args.star_budget_f_min,
-                budget_f_max=args.star_budget_f_max,
-                budget_midpoint=args.star_budget_midpoint,
-                budget_slope=args.star_budget_slope,
-                q_bank_csv=args.star_q_bank_csv,
-                q_min_bank=args.star_q_min,
-                q_max_bank=args.star_q_max,
-                budget_override=args.star_budget_override,
-                n_stages=lora_cfg.get("n_stages", 4),
-            )
-            planner = STPlanner(config=star_config)
-            plan = planner.plan(profile, spec.embed_dim, stage_dims, stage_n_params, t_lora, t_full)
-            if max(plan.ranks, default=0) > effective_max_rank:
-                raise ValueError(
-                    f"ST-LoRA planned rank {max(plan.ranks)} exceeds LoRA max_rank={effective_max_rank}. "
-                    "Use --max-rank at least as large as the planned rank."
-                )
-            lora_backbone.apply_schedule(plan.ranks, plan.unfrozen, fix_train_rank=True)
-            schedule_info = {
-                "method": getattr(args, "public_method", args.method),
-                "schedule_method": "spectra",
-                "plan_source": f"stlora_{args.star_planner}",
-                "ranks": plan.ranks,
-                "unfrozen": plan.unfrozen,
-                "precondition_ok": profile.precondition_ok,
-                "profile_scores": [round(q, 6) for q in profile.scores],
-                "delta_q": [round(dq, 6) for dq in plan.delta_q],
-                "profile_n_patches_used": profile.n_patches_used,
-                "profile_used_fallback": profile.used_fallback,
-                "profile_stopped_at": profile.stopped_at,
-                "stlora_param_fraction": plan.param_fraction,
-                "stlora_gpu_fraction": plan.gpu_fraction,
-                "stlora": {
-                    "strategy": plan.strategy,
-                    "reference_rank": star_config.reference_rank,
-                    "max_budget": star_config.reference_rank * star_config.n_stages,
-                    "budget": plan.budget,
-                    "budget_raw": plan.budget_raw,
-                    "budget_fraction": plan.budget_fraction,
-                    "budget_override": star_config.budget_override,
-                    "candidate_budgets": list(star_config.candidate_budgets),
-                    "q_overall": plan.q_overall,
-                    "q_norm": plan.q_norm,
-                    "q_min_bank": plan.q_min_bank,
-                    "q_max_bank": plan.q_max_bank,
-                    "tau": star_config.tau,
-                    "stage_prior": plan.stage_prior,
-                    "rank_grid": list(star_config.rank_grid),
-                    "min_rank": star_config.min_rank,
-                    "logits": [round(x, 6) for x in plan.logits],
-                    "weights": [round(w, 6) for w in plan.weights],
-                    "continuous_ranks": [round(r, 6) for r in plan.continuous_ranks],
-                    "budget_f_min": star_config.budget_f_min,
-                    "budget_f_max": star_config.budget_f_max,
-                    "budget_midpoint": star_config.budget_midpoint,
-                    "budget_slope": star_config.budget_slope,
-                    "q_bank_csv": str(star_config.q_bank_csv) if star_config.q_bank_csv else None,
-                },
-            }
-
-    elif _sched_method == "no_profile":
-        stage_dims, stage_n_params, t_lora, t_full = _load_mgas_stage_params(backbone_name, spec)
-        planner = MGASPlanner()
-        plan = planner.no_profile_plan(
-            spec.embed_dim, stage_dims, stage_n_params, t_lora, t_full
+        stage_dims, stage_n_params, t_lora, t_full = _load_stage_costs(backbone_name, spec)
+        star_stage_prior = tuple(float(x.strip()) for x in args.star_stage_prior.split(","))
+        star_budget_candidates = tuple(int(x.strip()) for x in args.star_budget_candidates.split(","))
+        star_config = STPlannerConfig(
+            strategy=args.star_planner,
+            reference_rank=args.star_reference_rank,
+            tau=args.star_tau,
+            stage_prior=star_stage_prior,
+            rank_grid=(4, 8, 16, 32, 64),
+            candidate_budgets=star_budget_candidates,
+            min_rank=4,
+            budget_f_min=args.star_budget_f_min,
+            budget_f_max=args.star_budget_f_max,
+            budget_midpoint=args.star_budget_midpoint,
+            budget_slope=args.star_budget_slope,
+            q_bank_csv=args.star_q_bank_csv,
+            q_min_bank=args.star_q_min,
+            q_max_bank=args.star_q_max,
+            budget_override=args.star_budget_override,
+            n_stages=lora_cfg.get("n_stages", 4),
         )
+        planner = STPlanner(config=star_config)
+        plan = planner.plan(profile, spec.embed_dim, stage_dims, stage_n_params, t_lora, t_full)
+        if max(plan.ranks, default=0) > effective_max_rank:
+            raise ValueError(
+                f"ST-LoRA planned rank {max(plan.ranks)} exceeds LoRA max_rank={effective_max_rank}. "
+                "Use --max-rank at least as large as the planned rank."
+            )
         lora_backbone.apply_schedule(plan.ranks, plan.unfrozen, fix_train_rank=True)
         schedule_info = {
             "method": getattr(args, "public_method", args.method),
-            "schedule_method": "no_profile",
-            "plan_source": "no_profile",
+            "schedule_method": "spectra",
+            "plan_source": f"stlora_{args.star_planner}",
             "ranks": plan.ranks,
             "unfrozen": plan.unfrozen,
-            "suffix_cut": plan.suffix_cut,
-            "precondition_ok": plan.precondition_ok,
-            "budget_reduced": plan.budget_reduced,
+            "precondition_ok": profile.precondition_ok,
+            "profile_scores": [round(q, 6) for q in profile.scores],
             "delta_q": [round(dq, 6) for dq in plan.delta_q],
-            "mgas_param_fraction": plan.param_fraction,
-            "mgas_gpu_fraction": plan.gpu_fraction,
+            "profile_n_patches_used": profile.n_patches_used,
+            "profile_used_fallback": profile.used_fallback,
+            "profile_stopped_at": profile.stopped_at,
+            "stlora_param_fraction": plan.param_fraction,
+            "stlora_gpu_fraction": plan.gpu_fraction,
+            "stlora": {
+                "strategy": plan.strategy,
+                "reference_rank": star_config.reference_rank,
+                "max_budget": star_config.reference_rank * star_config.n_stages,
+                "budget": plan.budget,
+                "budget_raw": plan.budget_raw,
+                "budget_fraction": plan.budget_fraction,
+                "budget_override": star_config.budget_override,
+                "candidate_budgets": list(star_config.candidate_budgets),
+                "q_overall": plan.q_overall,
+                "q_norm": plan.q_norm,
+                "q_min_bank": plan.q_min_bank,
+                "q_max_bank": plan.q_max_bank,
+                "tau": star_config.tau,
+                "stage_prior": plan.stage_prior,
+                "rank_grid": list(star_config.rank_grid),
+                "min_rank": star_config.min_rank,
+                "logits": [round(x, 6) for x in plan.logits],
+                "weights": [round(w, 6) for w in plan.weights],
+                "continuous_ranks": [round(r, 6) for r in plan.continuous_ranks],
+                "budget_f_min": star_config.budget_f_min,
+                "budget_f_max": star_config.budget_f_max,
+                "budget_midpoint": star_config.budget_midpoint,
+                "budget_slope": star_config.budget_slope,
+                "q_bank_csv": str(star_config.q_bank_csv) if star_config.q_bank_csv else None,
+            },
         }
 
     else:
@@ -2224,29 +1604,19 @@ def main() -> None:
     # Phase 4: Fine-tune — head always trainable; adapter/backbone at lower LR
 
     # Split backbone trainable params: LoRA A/B adapters (lr_adapter) vs unfrozen backbone
-    # weights (lr_backbone). Standard transfer learning uses 10× lower LR for backbone weights
-    # than LoRA adapters because pretrained features are fragile — aggressive updates destroy
-    # them before the head can converge.
-    lora_params    = lora_backbone.lora_adapter_params()
+    # weights (lr_backbone).
+    lora_params = lora_backbone.lora_adapter_params()
     backbone_params = lora_backbone.unfrozen_backbone_params()
-    # DualPatchEmbed's aux_proj + gate live inside encoder.patch_embed, so they get
-    # picked up by unfrozen_backbone_params() once we re-enable their grads. Exclude
-    # them here so they only appear in the dedicated dual-path param group below.
-    if use_dual_patch and dual_pe is not None:
-        aux_param_ids = {id(p) for p in dual_pe.aux_proj.parameters()}
-        aux_param_ids.add(id(dual_pe.gate))
-        backbone_params = [p for p in backbone_params if id(p) not in aux_param_ids]
-    # Same exclusion for virtual residual/router adapter parameters.
-    if use_virtual_residual and virt_res is not None:
-        res_param_ids = {id(p) for p in residual_adapter_params(virt_res)}
-        backbone_params = [p for p in backbone_params if id(p) not in res_param_ids]
+    if use_bre and bre is not None:
+        bre_param_ids = {id(p) for p in residual_adapter_params(bre)}
+        backbone_params = [p for p in backbone_params if id(p) not in bre_param_ids]
     if patch_embed_params:
         patch_embed_param_ids = {id(p) for p in patch_embed_params}
         backbone_params = [p for p in backbone_params if id(p) not in patch_embed_param_ids]
 
     residual_lr = args.lr_residual_override
     if residual_lr is None:
-        residual_lr = cfg.get("lr_residual", cfg.get("lr_aux", cfg.get("lr_head", 1e-3)))
+        residual_lr = cfg.get("lr_residual", cfg.get("lr_head", 1e-3))
     if args.stage2_lr_residual is not None:
         residual_lr = args.stage2_lr_residual
     adapter_lr = args.lr_adapter_override if args.lr_adapter_override is not None else cfg.get("lr_adapter", 1e-4)
@@ -2265,33 +1635,8 @@ def main() -> None:
     )
 
     param_groups = []
-    if use_ssc_pe and ssc_pe is not None:
-        # Train SSC-PE in phase 4 when backbone is also adapting (has LoRA or unfrozen weights).
-        # For frozen-backbone plans (LP, all-frozen): updating SSC-PE shifts token distribution
-        # for a backbone that isn't changing → oscillatory training.
-        # For adapting plans: SSC-PE must be trained jointly with LoRA so it can re-calibrate
-        # its cross-sensor projection for the LoRA-modified backbone. Freezing SSC-PE after
-        # warmup leaves it calibrated for the frozen backbone, causing persistent mIoU oscillation
-        # even with fix_train_rank=True (sen1floods11 v4: 0.528 with frozen SSC-PE vs 0.726 LoRA-8).
-        backbone_is_adapting = bool(lora_params) or bool(backbone_params)
-        if backbone_is_adapting:
-            ssc_pe_ft_lr = cfg.get("lr_ssc_pe_ft", cfg.get("lr_ssc_pe", 1e-3) * 0.1)
-            param_groups.append({"params": list(ssc_pe.parameters()), "lr": ssc_pe_ft_lr, "name": "ssc_pe"})
-    if use_mlp_proj and band_proj is not None:
-        # BandProjectorMLP is always trained — it's the sole cross-sensor adapter in this path.
-        param_groups.append({"params": list(band_proj.parameters()),
-                              "lr": cfg.get("lr_band_proj", 1e-4), "name": "band_proj"})
-    if use_dual_patch and dual_pe is not None:
-        # Aux Conv2d + per-channel gate are the only learnable parts of DualPatchEmbed
-        # (the wrapped pretrained patch_embed inside dual_pe remains frozen).
-        aux_params = list(dual_pe.aux_proj.parameters()) + [dual_pe.gate]
-        param_groups.append({"params": aux_params,
-                             "lr": cfg.get("lr_aux", cfg.get("lr_head", 1e-3)),
-                             "name": "dual_aux"})
-    if use_virtual_residual and virt_res is not None:
-        # Residual adapter params are the only learnable tokenizer-side params;
-        # the wrapped pretrained patch_embed remains frozen.
-        residual_params = [p for p in residual_adapter_params(virt_res) if p.requires_grad]
+    if use_bre and bre is not None:
+        residual_params = [p for p in residual_adapter_params(bre) if p.requires_grad]
         if residual_params:
             param_groups.append({
                 "params": residual_params,
@@ -2312,19 +1657,22 @@ def main() -> None:
         param_groups.append({"params": backbone_params, "lr": backbone_lr, "name": "backbone"})
     param_groups.append({"params": head_params, "lr": head_lr, "name": "head"})
     optimizer = torch.optim.AdamW(param_groups, weight_decay=cfg.get("weight_decay", 0.05))
-    logger.info("Param groups: band_proj=%d lora=%d ssc_pe=%d patch_embed=%d backbone=%d head=%d",
-                len(list(band_proj.parameters())) if (use_mlp_proj and band_proj) else 0,
-                len(lora_params),
-                len(list(ssc_pe.parameters())) if (use_ssc_pe and ssc_pe) else 0,
-                len(patch_embed_params),
-                len(backbone_params), len(head_params))
-    r_params_all = residual_adapter_params(virt_res) if (use_virtual_residual and virt_res is not None) else []
+
+    r_params_all = residual_adapter_params(bre) if (use_bre and bre is not None) else []
     r_optimizer_occurrences = optimizer_param_occurrences(optimizer, r_params_all) if r_params_all else 0
     patch_embed_optimizer_occurrences = (
         optimizer_param_occurrences(optimizer, patch_embed_params) if patch_embed_params else 0
     )
     logger.info(
-        "Residual optimizer audit: adapter params=%d  adapter lr=%s  optimizer occurrences=%d  freeze=%s  force_zero=%s",
+        "Param groups: bre=%d lora=%d patch_embed=%d backbone=%d head=%d",
+        sum(p.numel() for p in r_params_all),
+        len(lora_params),
+        len(patch_embed_params),
+        len(backbone_params),
+        len(head_params),
+    )
+    logger.info(
+        "BRE optimizer audit: adapter params=%d adapter lr=%s optimizer occurrences=%d freeze=%s force_zero=%s",
         sum(p.numel() for p in r_params_all),
         residual_lr if r_params_all and not args.freeze_residual else None,
         r_optimizer_occurrences,
@@ -2339,6 +1687,7 @@ def main() -> None:
         patch_embed_weight_decay if patch_embed_params else None,
         patch_embed_optimizer_occurrences,
     )
+    loss_mode = args.loss_mode
     loss_mode = args.loss_mode
     cw_cfg = cfg.get("class_weights", None) if loss_mode in {"weighted_ce", "ce_dice", "ce_dice_dwa"} else None
     class_weights_for_log = None
@@ -2377,9 +1726,6 @@ def main() -> None:
             "mode": "unweighted_ce",
             "reason": "class_weights config is not auto/list",
         }
-    if loss_mode == "lovasz":
-        class_weight_info = {"mode": "not_used_by_lovasz"}
-
     dice_class_mask, dice_class_mode, dice_include_background_cfg = build_dice_class_mask(
         split_label_counts["train"],
         n_classes,
@@ -2397,8 +1743,6 @@ def main() -> None:
             if loss_mode == "ce"
             else ce_formula
             if loss_mode == "weighted_ce"
-            else "LovaszSoftmax"
-            if loss_mode == "lovasz"
             else f"DWA({ce_formula}, DiceLoss)"
             if loss_mode == "ce_dice_dwa"
             else f"{ce_formula} + dice_lambda * DiceLoss"
@@ -2434,12 +1778,6 @@ def main() -> None:
             ),
             temperature=args.dwa_temperature,
         )
-    elif loss_mode == "lovasz":
-        criterion = LovaszSoftmaxLoss(
-            ignore_index=-1,
-            include_background=dice_include_background,
-            class_mask=dice_class_mask,
-        )
     logger.info("Loss config: %s", loss_config)
     staged_residual_config = {
         "stage1_bandsel_epochs": int(args.stage1_bandsel_epochs),
@@ -2448,12 +1786,7 @@ def main() -> None:
     }
     logger.info("Staged residual config: %s", staged_residual_config)
 
-    input_adapter_name = ("sscpe" if use_ssc_pe
-                          else "mlp" if use_mlp_proj
-                          else "bandsel" if use_band_select
-                          else "dual" if use_dual_patch
-                          else f"resid_{virtual_residual_mode}" if use_virtual_residual
-                          else "native")
+    input_adapter_name = ("bre" if use_bre else "bandsel" if use_band_select else "native")
     r_param_count = sum(p.numel() for p in r_params_all)
     r_optimizer_lr = residual_lr if r_param_count and r_optimizer_occurrences > 0 else None
     patch_embed_param_count = sum(p.numel() for p in patch_embed_params)
@@ -2469,12 +1802,12 @@ def main() -> None:
         if bandsel_indices is not None else None
     )
     lora_init_fingerprint = first_lora_norms(lora_backbone)
-    residual_fingerprint = residual_init_norms(virt_res if use_virtual_residual else None)
+    residual_fingerprint = residual_init_norms(bre if use_bre else None)
     schedule_ranks_for_log = schedule_info.get("ranks") if isinstance(schedule_info, dict) else None
     effective_lora_param_count = active_lora_param_count(lora_backbone, schedule_ranks_for_log)
     actual_lora_tensor_param_count = param_count(lora_params)
     seed_protocol = dict(resolved_seed_protocol)
-    if not use_virtual_residual:
+    if not use_bre:
         seed_protocol["residual_seed"] = None
         seed_protocol["train_shuffle_seed"] = None
         seed_protocol["eval_shuffle_seed"] = None
@@ -2520,10 +1853,10 @@ def main() -> None:
         **lora_init_fingerprint,
         **residual_fingerprint,
     }
-    if use_virtual_residual and virt_res is not None and hasattr(virt_res, "contribution_matrix_full"):
-        fingerprints["router_candidate_idx"] = [int(x) for x in virt_res.candidate_idx.detach().cpu().tolist()]
-        fingerprints["router_initial_contribution_matrix"] = virt_res.contribution_matrix_full()
-        fingerprints["router_initial_top3"] = virt_res.top_contributions(k=3)
+    if use_bre and bre is not None and hasattr(bre, "contribution_matrix_full"):
+        fingerprints["router_candidate_idx"] = [int(x) for x in bre.candidate_idx.detach().cpu().tolist()]
+        fingerprints["router_initial_contribution_matrix"] = bre.contribution_matrix_full()
+        fingerprints["router_initial_top3"] = bre.top_contributions(k=3)
     diagnostic_fingerprints = {
         "seed_protocol": seed_protocol,
         "fingerprints": fingerprints,
@@ -2531,11 +1864,11 @@ def main() -> None:
         "staged_residual": staged_residual_config,
         "split_seed": split_seed,
         "model_seed": model_seed,
-        "residual_seed": residual_seed if use_virtual_residual else None,
+        "residual_seed": residual_seed if use_bre else None,
         "lora_seed": lora_seed,
         "head_seed": head_seed,
         "model_init_seed": model_seed,
-        "residual_init_seed": residual_seed if use_virtual_residual else None,
+        "residual_init_seed": residual_seed if use_bre else None,
         "lora_init_seed": lora_seed,
         "head_init_seed": head_seed,
         "loader_seed": loader_seed,
@@ -2564,11 +1897,8 @@ def main() -> None:
         "force_residual_zero": args.force_residual_zero,
         "freeze_residual": args.freeze_residual,
         "consume_residual_rng": args.consume_residual_rng,
-        # Shuffle seeds (resE / shuffle_extra corruption). Always logged so the
-        # JSON describes the full RNG configuration even when the mode doesn't
-        # actually use them.
-        "train_shuffle_seed": (virt_res.train_shuffle_seed if use_virtual_residual and virt_res is not None else None),
-        "eval_shuffle_seed":  (virt_res.eval_shuffle_seed  if use_virtual_residual and virt_res is not None else None),
+        "train_shuffle_seed": (bre.train_shuffle_seed if use_bre and bre is not None else None),
+        "eval_shuffle_seed":  (bre.eval_shuffle_seed  if use_bre and bre is not None else None),
         **lora_init_fingerprint,
         **residual_fingerprint,
     }
@@ -2597,13 +1927,13 @@ def main() -> None:
         if checkpoint_load_info is not None:
             result["loaded_checkpoint"] = checkpoint_load_info
         if args.eval_delta_off:
-            if not (use_virtual_residual and virt_res is not None):
-                raise ValueError("--eval-delta-off requires a virtual residual method")
-            old_force = virt_res.force_delta_zero
-            virt_res.force_delta_zero = True
+            if not (use_bre and bre is not None):
+                raise ValueError("--eval-delta-off requires BRE")
+            old_force = bre.force_delta_zero
+            bre.force_delta_zero = True
             delta_off_val = evaluate_full(model, val_loader, device, criterion=criterion)
             delta_off_train = evaluate_full(model, train_loader, device, criterion=None)
-            virt_res.force_delta_zero = old_force
+            bre.force_delta_zero = old_force
             result["delta_off_val"] = delta_off_val
             result["delta_off_train_miou"] = delta_off_train["miou"]
         out_dir = RESULTS_DIR / "finetune"
@@ -2632,15 +1962,14 @@ def main() -> None:
     n_steps_total = 0
     max_grad_norm = args.max_grad_norm_override if args.max_grad_norm_override is not None else cfg.get("max_grad_norm", 1.0)
     logger.info("Gradient clipping: mode=%s max_norm=%s", args.grad_clip_mode, max_grad_norm)
-    gate_trajectory = []        # per-epoch (gate_l2, gate_mean_abs) for dual_patch runs
-    epoch_trajectory: list[dict] = []   # per-epoch full telemetry (val/train mIoU, loss, per-class IoU, residual norms)
+    epoch_trajectory: list[dict] = [] 
     checkpoint_dir = RESULTS_DIR / "checkpoints"
     best_checkpoint_path = checkpoint_dir / f"{run_id}_best.pt"
     final_checkpoint_path = checkpoint_dir / f"{run_id}_final.pt"
     for epoch in range(cfg.get("epochs", 10)):
         residual_stage_state = configure_residual_stage(
             epoch,
-            virt_res if use_virtual_residual else None,
+            bre if use_bre else None,
             optimizer,
             force_residual_zero=args.force_residual_zero,
             stage1_epochs=args.stage1_bandsel_epochs,
@@ -2693,11 +2022,11 @@ def main() -> None:
 
         # ---- Residual telemetry (only when a virtual residual is wired) ----
         residual_epoch_stats = None
-        if use_virtual_residual and virt_res is not None:
+        if use_bre and bre is not None:
             try:
                 _x_sample, _ = next(iter(val_loader))
                 _x_sample = _x_sample.to(device)
-                residual_epoch_stats = virt_res.measure_residual(_x_sample)
+                residual_epoch_stats = bre.measure_residual(_x_sample)
             except StopIteration:
                 pass
 
@@ -2739,9 +2068,9 @@ def main() -> None:
         epoch_trajectory.append(rec)
 
         extra = ""
-        if use_dual_patch and dual_pe is not None:
-            gate_l2 = dual_pe.gate_l2
-            gate_mean_abs = dual_pe.gate_mean_abs
+        if False and None is not None:
+            gate_l2 = None.gate_l2
+            gate_mean_abs = None.gate_mean_abs
             gate_trajectory.append({"epoch": epoch + 1,
                                     "gate_l2": gate_l2,
                                     "gate_mean_abs": gate_mean_abs})
@@ -2777,52 +2106,6 @@ def main() -> None:
             },
         )
         logger.info("Saved final adapted checkpoint -> %s", final_checkpoint_path)
-
-    # For resD (mask_mode="all") only: run test-time corruption diagnostics on the
-    # val set (Phase 1) plus the per-extra-band breakdown (Phase 2).
-    val_metric_zero    = None
-    val_metric_shuffle = None
-    per_band_corruption: dict[str, dict[int, float]] = {}
-    residual_measurements: dict | None = None
-    if use_virtual_residual and virtual_residual_mode == "all" and virt_res is not None:
-        logger.info("Running resD test-time corruption diagnostics (Phase 1 + Phase 2)...")
-
-        # --- Phase 1: all-extras corruption ---
-        virt_res.eval_corruption_bands = None              # default: all extras
-        virt_res.eval_corruption_mode = "zero_extra"
-        val_metric_zero    = evaluate(model, val_loader, cfg.get("eval_metric", "miou"), device)
-        virt_res.eval_corruption_mode = "shuffle_extra"
-        val_metric_shuffle = evaluate(model, val_loader, cfg.get("eval_metric", "miou"), device)
-
-        # --- Phase 2a: per-extra-band corruption ---
-        per_band_corruption = {"zero": {}, "shuffle": {}}
-        for band_idx in bandsel_indices:
-            pass  # selected bands are NEVER corrupted; we only loop over extras
-        for band_idx in [i for i in range(band_cfg.in_chans) if i not in bandsel_indices]:
-            virt_res.eval_corruption_bands = torch.tensor([band_idx], dtype=torch.long, device=device)
-            virt_res.eval_corruption_mode = "zero_extra"
-            per_band_corruption["zero"][band_idx]    = evaluate(model, val_loader, cfg.get("eval_metric", "miou"), device)
-            virt_res.eval_corruption_mode = "shuffle_extra"
-            per_band_corruption["shuffle"][band_idx] = evaluate(model, val_loader, cfg.get("eval_metric", "miou"), device)
-        virt_res.eval_corruption_bands = None
-        virt_res.eval_corruption_mode = None
-
-        # --- Phase 2b: residual magnitude / token-shift measurements on one val batch ---
-        try:
-            sample_x, _ = next(iter(val_loader))
-            sample_x = sample_x.to(device)
-            virt_res_obj = model.encoder.patch_embed     # the wrapped VirtualBandResidual
-            residual_measurements = virt_res_obj.measure_residual(sample_x)
-        except StopIteration:
-            residual_measurements = None
-
-        logger.info("Test-time corruption — val %s: normal_best=%.4f  zero=%.4f  shuffle=%.4f",
-                    cfg["eval_metric"], best_metric, val_metric_zero, val_metric_shuffle)
-        if residual_measurements is not None:
-            logger.info("Residual: delta/x_sel=%.4f  token_shift=%.4f  R_final_l2=%.4f",
-                        residual_measurements["delta_to_xsel_ratio"],
-                        residual_measurements["token_shift_ratio"],
-                        residual_measurements["R_final_layer_l2"])
 
     gpu_h = (time.time() - t_start) / 3600
 
@@ -2862,21 +2145,21 @@ def main() -> None:
     if args.save_checkpoints:
         result["best_checkpoint_path"] = str(best_checkpoint_path)
         result["final_checkpoint_path"] = str(final_checkpoint_path)
-    if use_dual_patch and dual_pe is not None:
-        result["dual_final_gate_l2"]       = dual_pe.gate_l2
-        result["dual_final_gate_mean_abs"] = dual_pe.gate_mean_abs
+    if False and None is not None:
+        result["dual_final_gate_l2"]       = None.gate_l2
+        result["dual_final_gate_mean_abs"] = None.gate_mean_abs
         result["dual_gate_trajectory"]     = gate_trajectory
     # Always attach the per-epoch trajectory (loss/mIoU/per-class IoU/pos-pred ratio, plus
     # residual diagnostics when applicable). Lets callers reconstruct full training curves.
     result["epoch_trajectory"] = epoch_trajectory
     if isinstance(criterion, DynamicWeightAverageLoss):
         result["dwa_history"] = criterion.history
-    if use_virtual_residual and virt_res is not None:
-        result["resid_mask_mode"]          = virtual_residual_mode
-        result["resid_final_layer_l2"]     = virt_res.delta_l2
-        if hasattr(virt_res, "contribution_matrix_full"):
-            result["router_contribution_matrix"] = virt_res.contribution_matrix_full()
-            result["router_top3"] = virt_res.top_contributions(k=3)
+    if use_bre and bre is not None:
+        result["bre_mode"]          = bre_mode
+        result["bre_final_layer_l2"]     = bre.delta_l2
+        if hasattr(bre, "contribution_matrix_full"):
+            result["router_contribution_matrix"] = bre.contribution_matrix_full()
+            result["router_top3"] = bre.top_contributions(k=3)
         if val_metric_zero is not None:
             result["val_miou_extra_zero"]    = round(val_metric_zero, 4)
         if val_metric_shuffle is not None:

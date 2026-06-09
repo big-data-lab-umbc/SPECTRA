@@ -1,5 +1,5 @@
 # Cell: Prithvi-EO-2.0 × Sen1Floods11 (calibration, binary seg, S2 13B)
-# Cross-sensor cell: S2 ≠ HLS pretraining → BRE/ST-LoRA selected by method
+# Cross-sensor cell: S2 ≠ HLS pretraining → BRE selected by method
 # Inherits base.yaml defaults
 
 backbone: prithvi_eo_v2_600
@@ -12,14 +12,7 @@ img_size: 224
 crop_size: 224
 eval_metric: miou
 
-use_ssc_pe: false
 
-ssc_pe:
-  srf_dim: 64
-  mixer_rank: 16
-  use_gate: true
 
 stlora:
-  epsilon: 0.02
   purity_tau: 0.8
-  min_rank: 4     # cross-sensor: SSC-PE mapping is imperfect, all stages need LoRA
