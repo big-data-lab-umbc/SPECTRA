@@ -1246,6 +1246,7 @@ def run_post_training_test_eval(
 
 
 def main() -> None:
+    # 1. Load CLI/config state, resolve seeds, and initialize logging.
     args = parse_args()
     cfg  = load_config(args.config)
     seed = args.seed
@@ -1297,6 +1298,7 @@ def main() -> None:
         args.save_checkpoints = True
         logger.info("Auto-test is enabled; enabling --save-checkpoints for best/final test evaluation.")
 
+    # 2. Resolve dataset/backbone metadata used by model and adapter setup.
     spec     = BACKBONE_SPECS[backbone_name]
     band_cfg = FULL_BAND_CONFIGS[dataset]
     srf_triples = torch.from_numpy(get_srf_triples(band_cfg.sensor_key)).to(device)
@@ -1311,7 +1313,7 @@ def main() -> None:
     n_classes = DATASET_N_CLASSES.get(dataset, 2)
     model_architecture = model_architecture_defaults(backbone_name)
 
-    # Build model components
+    # 3. Instantiate the backbone and choose the input adapter for this method.
     model = load_backbone(backbone_name, n_classes, device)
 
     # Public methods use native input, band selection baselines, or BRE.
@@ -1328,7 +1330,6 @@ def main() -> None:
         use_bre = False
         _sched_method = args.method
 
-    band_selector = None
     band_selector = None
     bandsel_indices = None
     if use_band_select or use_bre:
@@ -1377,10 +1378,6 @@ def main() -> None:
             n_r_params, bandsel_indices, extra_idx, bre.force_delta_zero,
             bre.train_shuffle_seed, bre.eval_shuffle_seed,
         )
-
-    # --- : separate code path (no adapter, no nested LoRA) ---
-    # --- NestedLoRA path ---
-
 
     if use_band_select:
         wire_band_selector(model, band_selector)
@@ -1452,13 +1449,13 @@ def main() -> None:
                 len(patch_embed_params),
             )
 
-    # Head params needed by SPECTRA warmup optimizer and Phase 4 — compute once here
+    # 4. Collect task-head params before building loaders and schedules.
     head_params = []
     for name, p in model.named_parameters():
         if not name.startswith("encoder."):
             head_params.append(p)
 
-    # Data loaders
+    # 5. Build loaders and split-level label statistics for losses and logging.
     train_loader = build_dataloader(
         dataset,
         "train",
@@ -1488,6 +1485,7 @@ def main() -> None:
 
     t_start = time.time()
 
+    # 6. Apply a fixed baseline schedule or run STPlanner for SPECTRA.
     if _sched_method == "spectra" and args.ranks is not None:
         # Manual-plan override: skip STPlanner profiling and apply the provided ranks/unfrozen.
         # Use case: replay the plan from a previous SPECTRA run with a different adapter,
@@ -1601,7 +1599,7 @@ def main() -> None:
     if args.load_adapted_checkpoint is not None:
         checkpoint_load_info = load_adapted_checkpoint(model, args.load_adapted_checkpoint, device)
 
-    # Phase 4: Fine-tune — head always trainable; adapter/backbone at lower LR
+    # 7. Build optimizer groups for BRE, LoRA, unfrozen backbone, and head.
 
     # Split backbone trainable params: LoRA A/B adapters (lr_adapter) vs unfrozen backbone
     # weights (lr_backbone).
@@ -1687,7 +1685,7 @@ def main() -> None:
         patch_embed_weight_decay if patch_embed_params else None,
         patch_embed_optimizer_occurrences,
     )
-    loss_mode = args.loss_mode
+    # 8. Build the segmentation loss and class-balancing metadata.
     loss_mode = args.loss_mode
     cw_cfg = cfg.get("class_weights", None) if loss_mode in {"weighted_ce", "ce_dice", "ce_dice_dwa"} else None
     class_weights_for_log = None
@@ -1786,6 +1784,7 @@ def main() -> None:
     }
     logger.info("Staged residual config: %s", staged_residual_config)
 
+    # 9. Snapshot diagnostics so each result JSON explains how the run was built.
     input_adapter_name = ("bre" if use_bre else "bandsel" if use_band_select else "native")
     r_param_count = sum(p.numel() for p in r_params_all)
     r_optimizer_lr = residual_lr if r_param_count and r_optimizer_occurrences > 0 else None
@@ -1904,6 +1903,7 @@ def main() -> None:
     }
     logger.info("Diagnostic fingerprints: %s", diagnostic_fingerprints)
 
+    # 10. Optional checkpoint evaluation path without additional training.
     if args.eval_only:
         logger.info("Running eval-only path")
         normal_val = evaluate_full(model, val_loader, device, criterion=criterion)
@@ -1958,6 +1958,7 @@ def main() -> None:
         wandb.init(project=cfg.get("wandb_project", "SPECTRA"),
                    config={**cfg, **schedule_info, "seed": seed, "method": args.method})
 
+    # 11. Main training loop: train, evaluate, checkpoint, and log telemetry.
     best_metric = 0.0
     n_steps_total = 0
     max_grad_norm = args.max_grad_norm_override if args.max_grad_norm_override is not None else cfg.get("max_grad_norm", 1.0)
@@ -2068,13 +2069,6 @@ def main() -> None:
         epoch_trajectory.append(rec)
 
         extra = ""
-        if False and None is not None:
-            gate_l2 = None.gate_l2
-            gate_mean_abs = None.gate_mean_abs
-            gate_trajectory.append({"epoch": epoch + 1,
-                                    "gate_l2": gate_l2,
-                                    "gate_mean_abs": gate_mean_abs})
-            extra = f"  gate_l2={gate_l2:.4f}  gate_mean|·|={gate_mean_abs:.4f}"
         if residual_epoch_stats is not None:
             extra += f"  gamma={rec.get('residual_scale', 1.0):.3f}  rLR={rec.get('residual_lr_active', residual_lr)}  d/x={rec['delta_to_xsel_ratio']:.3f}  tok={rec['token_shift_ratio']:.3f}  Rl2={rec['R_final_layer_l2']:.3f}"
         if dwa_epoch_summary is not None:
@@ -2084,6 +2078,7 @@ def main() -> None:
                     rec["val_loss"] if rec["val_loss"] is not None else float('nan'),
                     metric, train_miou_epoch, rec["val_pos_pred_ratio"], extra)
 
+    # 12. Final train/validation pass and optional final checkpoint.
     # Final eval on the training set (so we can tell collapse-on-train apart from
     # overfit-but-good-train). Uses the same train_loader (with augmentation enabled,
     # so values are a slight under-estimate vs. an un-augmented eval, but adequate).
@@ -2109,7 +2104,7 @@ def main() -> None:
 
     gpu_h = (time.time() - t_start) / 3600
 
-    # Save results
+    # 13. Write result JSON and optionally run best/final checkpoints on test.
     result = {
         "run_id": run_id,
         "dataset": dataset,
@@ -2145,53 +2140,17 @@ def main() -> None:
     if args.save_checkpoints:
         result["best_checkpoint_path"] = str(best_checkpoint_path)
         result["final_checkpoint_path"] = str(final_checkpoint_path)
-    if False and None is not None:
-        result["dual_final_gate_l2"]       = None.gate_l2
-        result["dual_final_gate_mean_abs"] = None.gate_mean_abs
-        result["dual_gate_trajectory"]     = gate_trajectory
     # Always attach the per-epoch trajectory (loss/mIoU/per-class IoU/pos-pred ratio, plus
     # residual diagnostics when applicable). Lets callers reconstruct full training curves.
     result["epoch_trajectory"] = epoch_trajectory
     if isinstance(criterion, DynamicWeightAverageLoss):
         result["dwa_history"] = criterion.history
     if use_bre and bre is not None:
-        result["bre_mode"]          = bre_mode
-        result["bre_final_layer_l2"]     = bre.delta_l2
+        result["bre_mode"] = bre_mode
+        result["bre_final_layer_l2"] = bre.delta_l2
         if hasattr(bre, "contribution_matrix_full"):
             result["router_contribution_matrix"] = bre.contribution_matrix_full()
             result["router_top3"] = bre.top_contributions(k=3)
-        if val_metric_zero is not None:
-            result["val_miou_extra_zero"]    = round(val_metric_zero, 4)
-        if val_metric_shuffle is not None:
-            result["val_miou_extra_shuffle"] = round(val_metric_shuffle, 4)
-        if per_band_corruption:
-            result["per_band_corruption"]    = {
-                mode: {int(k): round(v, 4) for k, v in d.items()}
-                for mode, d in per_band_corruption.items()
-            }
-        if residual_measurements is not None:
-            # Round floats for JSON readability
-            rm = residual_measurements
-            result["residual_measurements"] = {
-                "delta_l2":             round(rm["delta_l2"], 6),
-                "x_sel_l2":             round(rm["x_sel_l2"], 6),
-                "delta_to_xsel_ratio":  round(rm["delta_to_xsel_ratio"], 6),
-                "token_shift_ratio":    round(rm["token_shift_ratio"], 6),
-                "per_out_band_delta_l2":[round(v, 6) for v in rm["per_out_band_delta_l2"]],
-                "per_in_band_R0_w_l2":  [round(v, 6) for v in rm["per_in_band_R0_w_l2"]],
-                "R_final_layer_l2":     round(rm["R_final_layer_l2"], 6),
-            }
-            if "router_entropy_mean" in rm:
-                result["residual_measurements"]["router_entropy_mean"] = round(rm["router_entropy_mean"], 6)
-                result["residual_measurements"]["router_entropy_per_target"] = [
-                    round(v, 6) for v in rm.get("router_entropy_per_target", [])
-                ]
-                result["residual_measurements"]["router_top3"] = rm.get("router_top3")
-            for key in ("router_gate_mean", "router_gate_min", "router_gate_max", "gated_input_l2"):
-                if key in rm:
-                    result["residual_measurements"][key] = round(rm[key], 6)
-            if "router_top3" in rm and "router_top3" not in result["residual_measurements"]:
-                result["residual_measurements"]["router_top3"] = rm.get("router_top3")
     if args.auto_test:
         if not args.save_checkpoints:
             raise RuntimeError("Internal error: auto-test requires saved best/final checkpoints")
