@@ -189,7 +189,49 @@
       window.renderMathInElement(document.body, { delimiters: [{ left: '\\(', right: '\\)', display: false }, { left: '$$', right: '$$', display: true }] });
     }
   }
+  /* ---------------------------------------------------------------- on-this-page index */
+  function wireToc() {
+    var nav = $('#toc'), btn = $('#toc-btn');
+    if (!nav) return;
+    var links = Array.prototype.slice.call(nav.querySelectorAll('a'));
+    var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); });
+    var tops = Array.prototype.slice.call(nav.querySelector('ol').children);
+    var queued = false;
+    function update() {
+      queued = false;
+      var line = window.scrollY + Math.min(170, window.innerHeight * 0.3), cur = 0;
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i] && targets[i].getBoundingClientRect().top + window.scrollY <= line) cur = i;
+      }
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) cur = links.length - 1;
+      links.forEach(function (a, i) {
+        a.classList.toggle('active', i === cur);
+        if (i === cur) a.setAttribute('aria-current', 'location'); else a.removeAttribute('aria-current');
+      });
+      tops.forEach(function (li) {          // open the sub-list of the section being read
+        var here = li.querySelector('a.active'), head = li.firstElementChild;
+        li.classList.toggle('open', !!here);
+        head.classList.toggle('active-parent', !!here && here !== head);
+      });
+    }
+    function request() { if (!queued) { queued = true; window.requestAnimationFrame(update); } }
+    window.addEventListener('scroll', request, { passive: true });
+    window.addEventListener('resize', request);
+    window.addEventListener('load', request);
+    if (btn) {
+      btn.addEventListener('click', function () {
+        var open = nav.classList.toggle('open');
+        btn.setAttribute('aria-expanded', String(open));
+        btn.textContent = open ? 'Close' : 'Contents';
+      });
+      nav.addEventListener('click', function (e) {
+        if (e.target.tagName === 'A' && nav.classList.contains('open')) { nav.classList.remove('open'); btn.setAttribute('aria-expanded', 'false'); btn.textContent = 'Contents'; }
+      });
+    }
+    update();
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
-    renderMain(); renderBandFig(); wireCopy(); math();
+    renderMain(); renderBandFig(); wireCopy(); wireToc(); math();
   });
 })();

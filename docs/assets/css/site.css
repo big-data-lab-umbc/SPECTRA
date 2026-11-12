@@ -18,6 +18,7 @@
   --heading: "Google Sans", "Noto Sans", "Helvetica Neue", Arial, sans-serif;
   --body: "Noto Sans", "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --side: 0px;              /* width taken by the on-this-page index */
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; scroll-padding-top: 16px; }
@@ -70,7 +71,8 @@ figcaption { font-size: .93rem; color: var(--muted); margin-top: 10px; text-alig
 .fig a { display: block; }
 .fig.card { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
 .fig.narrow { max-width: 620px; margin-left: auto; margin-right: auto; }
-@media (min-width: 1200px) { .fig.breakout { margin-left: -100px; margin-right: -100px; } }
+/* wide figures use whatever room the column has beside the index, up to 100px a side */
+.fig.breakout { margin-inline: calc(-1 * clamp(0px, (100vw - var(--side) - 960px) / 2 - 22px, 100px)); }
 .figrow { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start; margin: 22px 0; }
 
 /* ------------------------------------------------------------------ key numbers */
@@ -193,6 +195,39 @@ pre { background: var(--code-bg); border: 1px solid #e6e6e6; border-radius: var(
 .bibwrap .copy:hover { background: #efefef; }
 .footer { padding: 34px 0 44px; text-align: center; font-size: .9rem; color: var(--muted); border-top: 1px solid var(--line); }
 .footer p { margin: 4px 0; }
+
+/* ------------------------------------------------------------------ on-this-page index */
+.toc { display: none; }
+.toc-title { font: 600 .72rem var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px 12px; }
+.toc ol { list-style: none; margin: 0; padding: 0; }
+.toc > ol { border-left: 1px solid #e4e4e4; }
+.toc a { display: block; margin-left: -1px; padding: 5px 10px 5px 12px; border-left: 2px solid transparent; font-size: .88rem; line-height: 1.35; color: var(--muted); }
+.toc a:hover { color: var(--ink); text-decoration: none; }
+.toc a.active { color: var(--ink); font-weight: 600; border-left-color: var(--ink); }
+.toc a.active-parent { color: var(--ink); }
+.toc ol ol { display: none; padding: 1px 0 4px; }
+.toc li.open > ol { display: block; }
+.toc ol ol a { padding: 3px 10px 3px 26px; font-size: .82rem; }
+.toc-btn { position: fixed; right: 14px; bottom: 14px; z-index: 31; background: var(--ink); color: #fff; border: 0; border-radius: 999px; padding: 10px 16px; font: 600 .86rem var(--body); cursor: pointer; box-shadow: 0 4px 14px rgba(0, 0, 0, .25); }
+@media (min-width: 1100px) {
+  :root { --side: 212px; }
+  body { padding-left: var(--side); }
+  .toc { display: block; position: fixed; left: 0; top: 0; bottom: 0; width: var(--side); padding: 30px 14px 24px 20px; overflow-y: auto; background: #fff; border-right: 1px solid #ececec; z-index: 10; }
+  .toc-btn { display: none; }
+}
+@media (max-width: 1099px) {
+  .toc.open { display: block; position: fixed; right: 14px; bottom: 64px; width: 236px; max-height: 70vh; overflow-y: auto; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 34px rgba(0, 0, 0, .18); padding: 14px 12px 12px; z-index: 30; }
+  .toc.open li > ol { display: block; }
+}
+
+/* ------------------------------------------------------------------ sources and references */
+.ptable.wrap th, .ptable.wrap td { white-space: normal; vertical-align: top; }
+.ptable.wrap td:first-child { white-space: nowrap; font-weight: 600; color: var(--ink); }
+.ptable .cite { font-size: .82em; white-space: nowrap; }
+.refs { margin: 0; padding-left: 26px; font-size: .95rem; }
+.refs li { margin: 9px 0; padding-left: 4px; }
+.refs li:target { background: #fff6d6; }
+.refs .more { white-space: nowrap; }
 
 @media (max-width: 860px) {
   .stats { grid-template-columns: 1fr 1fr; }

@@ -28,8 +28,37 @@
 </head>
 <body>
 
+<!-- ============================================================= on-this-page index -->
+<nav class="toc" id="toc" aria-label="On this page">
+  <p class="toc-title">On this page</p>
+  <ol>
+    <li><a href="#top">Overview</a></li>
+    <li><a href="#abstract">Abstract</a></li>
+    <li><a href="#problem">Problem</a></li>
+    <li><a href="#method">Method</a>
+      <ol>
+        <li><a href="#bre">Band-Routed Embedding</a></li>
+        <li><a href="#st-lora">ST-LoRA</a></li>
+      </ol>
+    </li>
+    <li><a href="#demo">Inference explorer</a></li>
+    <li><a href="#results">Results</a>
+      <ol>
+        <li><a href="#main-comparison">Main comparison</a></li>
+        <li><a href="#extra-bands">Extra-band embedding</a></li>
+        <li><a href="#rank-planning">Stage-wise ranks</a></li>
+      </ol>
+    </li>
+    <li><a href="#limits">Scope and limits</a></li>
+    <li><a href="#quickstart">Quick start</a></li>
+    <li><a href="#sources">Data and references</a></li>
+    <li><a href="#citation">BibTeX</a></li>
+  </ol>
+</nav>
+<button class="toc-btn" id="toc-btn" type="button" aria-expanded="false" aria-controls="toc">Contents</button>
+
 <!-- ============================================================= hero -->
-<header class="hero">
+<header class="hero" id="top">
   <div class="container">
     <h1><span class="name">SPECTRA</span>: Band-Routed Embedding and Stage-Wise LoRA for Cross-Sensor Fine-Tuning of Geospatial Foundation Models</h1>
     <p class="authors">
@@ -135,7 +164,7 @@
       <figcaption>SPECTRA architecture. BRE maps a target image with <i>C</i> observed bands to a <i>K</i>-band pretrained-compatible virtual image by combining a selected-band path with a learned all-band residual path. ST-LoRA runs once before fine-tuning to estimate transferability from frozen encoder features and assign stage-wise LoRA ranks. (Fig. 2 in the paper.)</figcaption>
     </figure>
 
-    <h3>Band-Routed Embedding (BRE)</h3>
+    <h3 id="bre">Band-Routed Embedding (BRE)</h3>
     <p>BRE builds a <i>K</i>-channel &ldquo;virtual image&rdquo; for the frozen patch embedding out of all <i>C</i> downstream bands. The design principle is to keep the selected-band input as a physically grounded anchor and add a learned correction from every available band.</p>
     <figure class="fig breakout">
       <div class="diagram"><svg viewBox="0 24 1064 394" role="img" aria-label="Band-Routed Embedding. All C input bands feed two paths. Band selection keeps K bands as the anchor X_sel. In the residual path the bands are multiplied by a learned K-by-C gate table (initialized to 1), giving K times C gated channels that a shared 1-by-1 convolutional adapter with a zero-initialized last layer turns into a K-band correction. The sum, the virtual image X_BRE, goes to the frozen patch embedding.">
@@ -255,7 +284,7 @@
       <li><b>Virtual image.</b> \(X_{\mathrm{BRE}} = X_{\mathrm{sel}} + \Delta_\theta(X)\) has exactly <i>K</i> channels, so the pretrained patch embedding is used unchanged. No downstream band is hard-discarded: each one can influence every virtual band.</li>
     </ol>
 
-    <h3>Stage-wise Transferability-aware LoRA (ST-LoRA)</h3>
+    <h3 id="st-lora">Stage-wise Transferability-aware LoRA (ST-LoRA)</h3>
     <p>Uniform LoRA gives every stage the same rank. ST-LoRA runs a planner once, before fine-tuning, that measures how well each frozen encoder stage already transfers to the target task and then assigns each stage its own rank. The schedule stays fixed during training.</p>
     <figure class="fig breakout">
       <div class="diagram"><svg viewBox="0 14 1064 486" role="img" aria-label="Stage-wise Transferability-aware LoRA. The pretrained encoder's attention blocks, numbered 1 to 32, are grouped into four stages connected in series; the patch embedding and all four stages are frozen. Each stage has one trained LoRA adapter whose rank differs by stage (16, 32, 16, 16 in the example). Before fine-tuning, the ST-planner reads features from each stage, scores them with LogME, converts the scores to a transfer or repair signal, and allocates ranks under a total budget. The UPerNet decoder is trained.">
@@ -388,7 +417,7 @@
 <!-- ============================================================= demo -->
 <section class="section band" id="demo">
   <div class="container wide">
-    <h2>Inference explorer</h2>
+    <h2>Model inference explorer</h2>
     <p class="lead">Predictions from the checkpoints behind the paper&rsquo;s main table, on held-out test tiles. Pick a dataset, a GeoFM and a tile, then compare four fine-tuning methods on the same input.</p>
     <div class="explorer" id="explorer"><p class="ex-error">Loading the explorer&hellip;</p></div>
     <noscript><p class="ex-error">The explorer needs JavaScript. Figure 4 of the paper shows the same kind of comparison.</p></noscript>
@@ -412,7 +441,7 @@
     <h2>Results</h2>
     <p class="lead">Three EO-pretrained GeoFMs, four segmentation datasets, a shared UPerNet decoder, three seeds. All numbers below are from the paper.</p>
 
-    <h3>Main comparison</h3>
+    <h3 id="main-comparison">Main comparison</h3>
     <p>SPECTRA reaches strong accuracy with only 3.29&ndash;7.73% trainable parameters. The gains are clearest for ScaleMAE and SatMAE, whose pretrained band interfaces differ most from the downstream sensors. On ScaleMAE, SPECTRA lifts Sen1Floods11 macro mIoU from 77.17 (LoRA-64) and 75.41 (full fine-tuning) to 85.45, and FireScars from 69.03 and 72.30 to 82.05.</p>
     <div id="main-table">
       <div class="ctl-row">
@@ -428,7 +457,7 @@
       <figcaption>Predictions for LoRA-32 with band selection, surgical tuning, SPECTRA and full fine-tuning on two Sen1Floods11 examples. Green, blue, and red denote true positives, false positives, and false negatives. (Fig. 4 in the paper; both tiles are in the explorer above.)</figcaption>
     </figure>
 
-    <h3>Does extra-band embedding help?</h3>
+    <h3 id="extra-bands">Does extra-band embedding help?</h3>
     <p>Averaged over three GeoFMs, four datasets and five fine-tuning policies, replacing band selection with BRE raises mean macro mIoU from 66.36 to 69.24 (+2.88 points). A direct MLP projector that also uses every band lowers it to 64.08 (&minus;2.28). Extra bands are useful, but the input adapter has to preserve the pretrained spectral interface: the MLP changes the input distribution before the pretrained patch embedding, so the model must relearn a spectral tokenizer while adapting to the task.</p>
     <div class="table-wrap"><table class="ptable"><thead><tr><th>Fine-tuning method</th><th class="num"><i>n</i></th><th class="num">Band selection</th><th class="num">+ MLP</th><th class="num">+ BRE</th><th class="num">&Delta; MLP</th><th class="num">&Delta; BRE</th></tr></thead><tbody>
 <tr><td>LoRA-16</td><td class="num">12</td><td class="num">65.89</td><td class="num">64.26</td><td class="num best">68.95</td><td class="num neg">&minus;1.63</td><td class="num best">+3.06</td></tr>
@@ -444,7 +473,7 @@
       <figcaption>Band selection (hatched) against BRE (solid) for each fine-tuning method, by foreground F1. Orange bars are the full SPECTRA pipeline with BRE and ST-LoRA. (Fig. 5 in the paper.)</figcaption>
     </figure>
 
-    <h3>Does ST-LoRA select useful stage-wise ranks?</h3>
+    <h3 id="rank-planning">Does ST-LoRA select useful stage-wise ranks?</h3>
     <div class="figrow">
       <figure class="fig card">
         <a href="assets/img/fig6_accuracy_cost.png"><img src="assets/img/fig6_accuracy_cost.png" width="1500" height="2321" loading="lazy" alt="Twelve small plots, one per GeoFM and dataset, of macro mIoU against the percentage of trainable parameters for linear probing, uniform LoRA ranks, surgical tuning, SPECTRA and full fine-tuning."></a>
@@ -523,8 +552,53 @@ export SPECTRA_SEN1FLOODS11_ROOT=/path/to/sen1floods11</code></pre>
   </div>
 </section>
 
+<!-- ============================================================= data sources and references -->
+<section class="section band" id="sources">
+  <div class="container">
+    <h2>Data sources and references</h2>
+    <p class="lead">Everything used in the paper is public. Numbers in brackets point to the reference list below.</p>
+
+    <h3>Foundation models studied</h3>
+    <div class="table-wrap"><table class="ptable wrap"><thead><tr><th>GeoFM</th><th>Pretraining data</th><th>Input interface</th><th class="num">Bands <i>K</i></th><th>Backbone</th><th>Paper</th><th>Weights and code</th></tr></thead><tbody>
+<tr><td>Prithvi-EO-2.0</td><td>HLS (Landsat/Sentinel-2)</td><td>HLS optical</td><td class="num">6</td><td>ViT-Huge</td><td><a class="cite" href="#ref-1">[1]</a></td><td><a href="https://huggingface.co/ibm-nasa-geospatial/Prithvi-EO-2.0-600M">Weights (600M)</a> &middot; <a href="https://github.com/NASA-IMPACT/Prithvi-EO-2.0">Code</a></td></tr>
+<tr><td>SatMAE</td><td>fMoW-Sentinel / Sentinel-2</td><td>Sentinel-2 multispectral</td><td class="num">10</td><td>ViT-Large</td><td><a class="cite" href="#ref-2">[2]</a></td><td><a href="https://github.com/sustainlab-group/SatMAE">Code and weights</a></td></tr>
+<tr><td>ScaleMAE</td><td>fMoW/ImageNet RGB</td><td>RGB</td><td class="num">3</td><td>ViT-Large</td><td><a class="cite" href="#ref-3">[3]</a></td><td><a href="https://github.com/torchgeo/torchgeo/blob/main/torchgeo/models/scale_mae.py">TorchGeo implementation</a></td></tr>
+</tbody></table></div>
+
+    <h3>Downstream datasets</h3>
+    <div class="table-wrap"><table class="ptable wrap"><thead><tr><th>Dataset</th><th>Input source</th><th class="num">Bands <i>C</i></th><th class="num">Classes</th><th>Task</th><th>Reference</th><th>Download</th></tr></thead><tbody>
+<tr><td>Sen1Floods11</td><td>Sentinel-2 / Sen1Floods11</td><td class="num">13</td><td class="num">2</td><td>Flood</td><td><a class="cite" href="#ref-4">[4]</a></td><td><a href="https://github.com/cloudtostreet/Sen1Floods11">GitHub</a></td></tr>
+<tr><td>FireScars</td><td>HLS FireScars / GEO-Bench</td><td class="num">6</td><td class="num">2</td><td>Burn-scar</td><td><a class="cite" href="#ref-6">[6]</a></td><td><a href="https://huggingface.co/datasets/ibm-nasa-geospatial/hls_burn_scars">Hugging Face: HLS Burn Scar Scenes</a></td></tr>
+<tr><td>Landslide4Sense</td><td>Sentinel-2 + DEM channels</td><td class="num">14</td><td class="num">2</td><td>Landslide</td><td><a class="cite" href="#ref-5">[5]</a></td><td><a href="https://huggingface.co/datasets/ibm-nasa-geospatial/Landslide4sense">Hugging Face mirror</a></td></tr>
+<tr><td>SA Crop Type</td><td>Sentinel-2 L2A / GEO-Bench</td><td class="num">12</td><td class="num">10</td><td>Crop-type</td><td><a class="cite" href="#ref-6">[6]</a></td><td><a href="https://github.com/ServiceNow/geo-bench">GEO-Bench</a> &middot; <a href="https://huggingface.co/datasets/recursix/geo-bench-1.0">Hugging Face</a></td></tr>
+</tbody></table></div>
+
+    <h3>Software this work builds on</h3>
+    <div class="table-wrap"><table class="ptable wrap"><thead><tr><th>Component</th><th>Used for</th><th>Reference</th><th>Code</th></tr></thead><tbody>
+<tr><td>TerraTorch</td><td>Prithvi segmentation task and the shared UPerNet decoder</td><td><a class="cite" href="#ref-10">[10]</a></td><td><a href="https://github.com/torchgeo/terratorch">github.com/torchgeo/terratorch</a></td></tr>
+<tr><td>LoRA</td><td>Reference implementation behind the LoRA adapters</td><td><a class="cite" href="#ref-7">[7]</a></td><td><a href="https://github.com/microsoft/LoRA">github.com/microsoft/LoRA</a></td></tr>
+<tr><td>LogME</td><td>Reference implementation of the transferability score used by the ST-planner</td><td><a class="cite" href="#ref-9">[9]</a></td><td><a href="https://github.com/thuml/LogME">github.com/thuml/LogME</a></td></tr>
+</tbody></table></div>
+
+    <h3>References</h3>
+    <ol class="refs">
+<li id="ref-1">Daniela Szwarcman et al. <a href="https://doi.org/10.1109/TGRS.2025.3642610">Prithvi-EO-2.0: A Versatile Multi-Temporal Foundation Model for Earth Observation Applications</a>. <i>IEEE Transactions on Geoscience and Remote Sensing</i>, 2025. <span class="more">[<a href="https://arxiv.org/abs/2412.02732">arXiv</a>]</span></li>
+<li id="ref-2">Yezhen Cong et al. <a href="https://arxiv.org/abs/2207.08051">SatMAE: Pre-training Transformers for Temporal and Multi-Spectral Satellite Imagery</a>. <i>Advances in Neural Information Processing Systems</i>, 2022.</li>
+<li id="ref-3">Colorado J. Reed et al. <a href="https://arxiv.org/abs/2212.14532">Scale-MAE: A Scale-Aware Masked Autoencoder for Multiscale Geospatial Representation Learning</a>. <i>Proceedings of the IEEE/CVF International Conference on Computer Vision</i>, 2023.</li>
+<li id="ref-4">Derrick Bonafilia et al. <a href="https://github.com/cloudtostreet/Sen1Floods11">Sen1Floods11: A Georeferenced Dataset to Train and Test Deep Learning Flood Algorithms for Sentinel-1</a>. <i>Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops</i>, 2020.</li>
+<li id="ref-5">Omid Ghorbanzadeh et al. <a href="https://doi.org/10.1109/TGRS.2022.3215209">Landslide4Sense: Reference Benchmark Data and Deep Learning Models for Landslide Detection</a>. <i>IEEE Transactions on Geoscience and Remote Sensing</i>, 2022.</li>
+<li id="ref-6">Alexandre Lacoste et al. <a href="https://arxiv.org/abs/2306.03831">GEO-Bench: Toward Foundation Models for Earth Monitoring</a>. <i>Advances in Neural Information Processing Systems</i>, 2023.</li>
+<li id="ref-7">Edward J. Hu et al. <a href="https://arxiv.org/abs/2106.09685">LoRA: Low-Rank Adaptation of Large Language Models</a>. <i>International Conference on Learning Representations</i>, 2022.</li>
+<li id="ref-8">Yoonho Lee et al. <a href="https://arxiv.org/abs/2210.11466">Surgical Fine-Tuning Improves Adaptation to Distribution Shifts</a>. <i>International Conference on Learning Representations</i>, 2023.</li>
+<li id="ref-9">Kaichao You et al. <a href="https://proceedings.mlr.press/v139/you21b.html">LogME: Practical Assessment of Pre-trained Models for Transfer Learning</a>. <i>Proceedings of the 38th International Conference on Machine Learning</i>, 2021.</li>
+<li id="ref-10">Tete Xiao et al. <a href="https://arxiv.org/abs/1807.10221">Unified Perceptual Parsing for Scene Understanding</a>. <i>Proceedings of the European Conference on Computer Vision</i>, 2018.</li>
+</ol>
+    <p class="tnote" style="text-align:left">The complete reference list is in the <a href="https://arxiv.org/abs/2608.01751">paper</a>.</p>
+  </div>
+</section>
+
 <!-- ============================================================= citation -->
-<section class="section band" id="citation">
+<section class="section" id="citation">
   <div class="container">
     <h2>BibTeX</h2>
     <div class="bibwrap">
