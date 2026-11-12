@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPECTRA: Band-Routed Embedding and Stage-Wise LoRA for Cross-Sensor Fine-Tuning of Geospatial Foundation Models</title>
+<meta name="description" content="SPECTRA is a parameter-efficient fine-tuning framework for geospatial foundation models that uses every band of the downstream sensor (Band-Routed Embedding) and assigns LoRA rank per encoder stage (ST-LoRA). ACM SIGSPATIAL 2026.">
+<meta property="og:title" content="SPECTRA: Band-Routed Embedding and Stage-Wise LoRA for Cross-Sensor Fine-Tuning of Geospatial Foundation Models">
+<meta property="og:description" content="Parameter-efficient cross-sensor fine-tuning of geospatial foundation models. ACM SIGSPATIAL 2026.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="assets/img/teaser.jpg">
+<meta name="citation_title" content="SPECTRA: Band-Routed Embedding and Stage-Wise LoRA for Cross-Sensor Fine-Tuning of Geospatial Foundation Models">
+<meta name="citation_author" content="Li, Xingyan">
+<meta name="citation_author" content="Caraballo-Vega, Jordan A.">
+<meta name="citation_author" content="Gong, Jie">
+<meta name="citation_author" content="Carroll, Mark L.">
+<meta name="citation_author" content="Wang, Jianwu">
+<meta name="citation_publication_date" content="2026">
+<meta name="citation_conference_title" content="The 34th ACM International Conference on Advances in Geographic Information Systems (SIGSPATIAL '26)">
+<meta name="citation_doi" content="10.1145/3841645.3842981">
+<meta name="citation_arxiv_id" content="2608.01751">
+<meta name="citation_pdf_url" content="https://arxiv.org/pdf/2608.01751">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css?family=Google+Sans:400,500,700|Noto+Sans:400,500,600,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="assets/css/site.css">
+</head>
+<body>
+
+<!-- ============================================================= hero -->
+<header class="hero">
+  <div class="container">
+    <h1><span class="name">SPECTRA</span>: Band-Routed Embedding and Stage-Wise LoRA for Cross-Sensor Fine-Tuning of Geospatial Foundation Models</h1>
+    <p class="authors">
+      <span><a href="https://bdal.umbc.edu/people/xingyanli">Xingyan Li</a><sup>1</sup>,</span>
+      <span>Jordan A. Caraballo-Vega<sup>2</sup>,</span>
+      <span>Jie Gong<sup>2</sup>,</span>
+      <span>Mark L. Carroll<sup>2</sup>,</span>
+      <span>Jianwu Wang<sup>1</sup></span>
+    </p>
+    <p class="affils">
+      <span><sup>1</sup>University of Maryland, Baltimore County</span>
+      <span><sup>2</sup>NASA Goddard Space Flight Center</span>
+    </p>
+    <p class="venue">ACM SIGSPATIAL 2026 &middot; Research Track</p>
+    <nav class="links" aria-label="Paper resources">
+      <a class="btn" href="https://arxiv.org/abs/2608.01751">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h8l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm7 1.5V8h4.5L13 3.5zM8 12v1.6h8V12H8zm0 3.4V17h8v-1.6H8zM8 8.6v1.6h3.5V8.6H8z"/></svg>Paper</a>
+      <a class="btn" href="https://arxiv.org/pdf/2608.01751">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a1 1 0 0 1 1 1v9.6l3.3-3.3 1.4 1.4L12 17.4l-5.7-5.7 1.4-1.4 3.3 3.3V4a1 1 0 0 1 1-1zM5 19h14v2H5v-2z"/></svg>PDF</a>
+      <a class="btn" href="https://github.com/big-data-lab-umbc/SPECTRA">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Code</a>
+      <a class="btn" href="#demo">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5zm2 0v9.6l3.5-3.5 3 3 4.5-4.5 3 3V5H5zm3.5 5a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5z"/></svg>Demo</a>
+      <a class="btn" href="#citation">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h6v6c0 3.3-1.8 5.8-5 7l-1-1.8c1.7-.8 2.7-2 3-3.2H5V5zm8 0h6v6c0 3.3-1.8 5.8-5 7l-1-1.8c1.7-.8 2.7-2 3-3.2h-3V5z"/></svg>BibTeX</a>
+    </nav>
+  </div>
+</header>
+
+<section class="teaser">
+  <div class="container">
+    <div class="teaser-grid">
+      <figure><img src="assets/img/teaser_input.jpg" width="448" height="448" alt="True-colour Sentinel-2 tile with a river crossing farmland and a town."><figcaption>Sentinel-2 input</figcaption></figure>
+      <figure><img src="assets/img/teaser_label.jpg" width="448" height="448" alt="The same tile with the labeled water area in green."><figcaption>Water label</figcaption></figure>
+      <figure><img src="assets/img/teaser_lora32.jpg" width="448" height="448" alt="LoRA-32 prediction: most of the river is found, but a side channel is missed (red) and there are false alarms (blue)."><figcaption>LoRA-32, band selection &middot; mIoU 0.868</figcaption></figure>
+      <figure class="ours"><img src="assets/img/teaser_spectra.jpg" width="448" height="448" alt="SPECTRA prediction: the river and most of the side channel are found."><figcaption><b>SPECTRA</b> &middot; mIoU 0.911</figcaption></figure>
+    </div>
+    <p class="teaser-cap">ScaleMAE on a Sen1Floods11 test tile (USA_348639, also shown in the paper&rsquo;s Fig. 4). ScaleMAE was pretrained on RGB, so band selection hands it 3 of the 13 Sentinel-2 bands and drops 10; SPECTRA routes all 13 into the same three input slots. Green is correctly mapped water, blue a false alarm, red missed water. <a href="#demo">Explore more tiles, GeoFMs and methods</a>.</p>
+  </div>
+</section>
+
+<!-- ============================================================= key numbers -->
+<section class="section band" id="highlights">
+  <div class="container">
+    <div class="stats">
+      <div class="stat"><b>+2.88</b><span>mean macro mIoU from adding BRE, over band selection, across 60 matched configurations</span></div>
+      <div class="stat"><b>3.29&ndash;7.73%</b><span>of parameters trained by SPECTRA across 3 GeoFMs and 4 datasets</span></div>
+      <div class="stat"><b>17.1&ndash;33.6%</b><span>fewer active trainable parameters than LoRA-32 on Sen1Floods11</span></div>
+      <div class="stat"><b>77.17 &rarr; 85.45</b><span>macro mIoU for ScaleMAE on Sen1Floods11, LoRA-64 &rarr; SPECTRA</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================= abstract -->
+<section class="section" id="abstract">
+  <div class="container">
+    <h2>Abstract</h2>
+    <p class="justify">Geospatial foundation models (GeoFMs), pretrained on large-scale geospatial data such as Earth observation (EO), climate, and weather data, have shown promising performance when fine-tuned on diverse downstream tasks. However, there are two challenges in adapting EO-pretrained GeoFMs to practical fine-tuning datasets (downstream datasets). The first challenge is how to handle spectral mismatch: pretrained patch embeddings expect a fixed set of input bands, whereas downstream sensors may provide different channels. The second challenge is how to reduce fine-tuning cost and make it efficient. While existing work has made efforts on these challenges individually, methods that tackle both jointly remain underexplored. We propose SPECTRA, a parameter-efficient fine-tuning framework that addresses both spectral mismatch and adaptation cost. To handle spectral mismatch, SPECTRA introduces Band-Routed Embedding (BRE), which maps all available downstream bands into the band space expected by the pretrained GeoFM. By using BRE, all available bands in the downstream dataset are utilized to improve the selected-band input without changing the pretrained patch embedding interface. To reduce adaptation cost, SPECTRA further introduces a Stage-wise Transferability-aware LoRA (ST-LoRA) fine-tuning. ST-LoRA estimates stage-wise transferability before fine-tuning and assigns stage-specific LoRA ranks to reduce trainable parameters. Across three EO-pretrained GeoFMs and four downstream segmentation datasets, experiments show that BRE improves performance by utilizing all spectral bands, while ST-LoRA reduces trainable parameters compared with full fine-tuning and standard LoRA. Code is available at <a href="https://github.com/big-data-lab-umbc/SPECTRA">github.com/big-data-lab-umbc/SPECTRA</a>.</p>
+  </div>
+</section>
+
+<!-- ============================================================= problem -->
+<section class="section band" id="problem">
+  <div class="container">
+    <h2>Two obstacles to reusing a GeoFM</h2>
+
+    <h3>Spectral mismatch</h3>
+    <p>A pretrained patch embedding defines a fixed input band interface: it expects a particular number, order, and spectral meaning of input channels. Downstream datasets often come from other sensors or carry more bands. The common fix, which the paper calls <em>band selection</em>, keeps the downstream bands that best match the pretrained ones and discards the rest. It preserves the pretrained embedding, but every unselected channel becomes invisible to the model.</p>
+
+    <div class="bandfig" id="bandfig">
+      <div class="ctl-row">
+        <div class="ctl"><span>GeoFM</span><div class="seg small" id="bf-geofm"></div></div>
+        <div class="ctl"><span>Dataset</span><div class="seg small" id="bf-dataset"></div></div>
+        <div class="ctl"><span>Input</span><div class="seg small" id="bf-mode"></div></div>
+      </div>
+      <div class="scroll"></div>
+      <p class="summary"></p>
+      <div class="key">
+        <span><i style="background:#2a78d6"></i>kept by band selection</span>
+        <span><i style="background:#fff;border:1.5px dashed #a9a9a4"></i>discarded by band selection</span>
+        <span><i style="background:#363636"></i>pretrained input slot</span>
+        <span><i style="background:#eb6834;height:3px;border-radius:0;vertical-align:3px"></i>BRE residual path</span>
+      </div>
+    </div>
+    <p class="tnote" style="margin-top:-14px !important">Selected and discarded bands, and the transfer gap, are from Table 3 and Appendix A of the paper.</p>
+
+    <h3>Fine-tuning cost</h3>
+    <p>Full fine-tuning updates every parameter of a large pretrained encoder, which is expensive in GPU memory, optimization time, and model storage. LoRA trains far fewer parameters, but it usually applies the same rank to every layer or stage, even though encoder stages differ in how well they transfer to a target task. Surgical fine-tuning adapts a subset of layers, but unfreezing an entire stage still needs many more trainable parameters than LoRA.</p>
+    <figure class="fig card narrow">
+      <a href="assets/img/fig1_peft_comparison.png"><img src="assets/img/fig1_peft_comparison.png" width="1200" height="586" loading="lazy" alt="Schematic comparing fine-tuning policies: full fine-tuning, LoRA, surgical fine-tuning, and SPECTRA, marking which components are frozen and which are trained."></a>
+      <figcaption>The fine-tuning methods compared in this work. SPECTRA adds a pretrained-compatible BRE input path and uses ST-LoRA to assign stage-wise LoRA ranks. (Fig. 1 in the paper.)</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================================================= method -->
+<section class="section" id="method">
+  <div class="container">
+    <h2>Method</h2>
+    <p class="lead">SPECTRA has two components. Band-Routed Embedding (BRE) handles spectral mismatch at the input; Stage-wise Transferability-aware LoRA (ST-LoRA) controls adaptation cost in the encoder.</p>
+    <figure class="fig breakout">
+      <a href="assets/img/fig2_architecture.png"><img src="assets/img/fig2_architecture.png" width="2400" height="568" loading="lazy" alt="SPECTRA architecture: all target bands pass through band-routed gates and a residual adapter to form virtual pretrained-compatible bands, which feed the frozen patch embedding and a four-stage encoder with LoRA modules; a planner maps stage transferability scores to LoRA ranks; a UPerNet decoder outputs the segmentation map."></a>
+      <figcaption>SPECTRA architecture. BRE maps a target image with <i>C</i> observed bands to a <i>K</i>-band pretrained-compatible virtual image by combining a selected-band path with a learned all-band residual path. ST-LoRA runs once before fine-tuning to estimate transferability from frozen encoder features and assign stage-wise LoRA ranks. (Fig. 2 in the paper.)</figcaption>
+    </figure>
+
+    <h3>Band-Routed Embedding (BRE)</h3>
+    <p>BRE builds a <i>K</i>-channel &ldquo;virtual image&rdquo; for the frozen patch embedding out of all <i>C</i> downstream bands. The design principle is to keep the selected-band input as a physically grounded anchor and add a learned correction from every available band.</p>
+    <figure class="fig breakout">
+      <div class="diagram"><svg viewBox="0 24 1064 394" role="img" aria-label="Band-Routed Embedding. All C input bands feed two paths. Band selection keeps K bands as the anchor X_sel. In the residual path the bands are multiplied by a learned K-by-C gate table (initialized to 1), giving K times C gated channels that a shared 1-by-1 convolutional adapter with a zero-initialized last layer turns into a K-band correction. The sum, the virtual image X_BRE, goes to the frozen patch embedding.">
+<defs><marker id="bre-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0.8 10 5 0 9.2z" fill="#444444"/></marker></defs>
+<polygon points="20,230.0 70,230.0 88,218.0 38,218.0" fill="#d5d5cf" stroke="#ffffff" stroke-width="1"/><polygon points="20,222.0 70,222.0 88,210.0 38,210.0" fill="#d5d5cf" stroke="#ffffff" stroke-width="1"/><polygon points="20,214.0 70,214.0 88,202.0 38,202.0" fill="#d5d5cf" stroke="#ffffff" stroke-width="1"/><polygon points="20,206.0 70,206.0 88,194.0 38,194.0" fill="#d5d5cf" stroke="#ffffff" stroke-width="1"/><polygon points="20,198.0 70,198.0 88,186.0 38,186.0" fill="#4a86c8" stroke="#ffffff" stroke-width="1"/><polygon points="20,190.0 70,190.0 88,178.0 38,178.0" fill="#4a86c8" stroke="#ffffff" stroke-width="1"/><polygon points="20,182.0 70,182.0 88,170.0 38,170.0" fill="#4a86c8" stroke="#ffffff" stroke-width="1"/><polygon points="20,174.0 70,174.0 88,162.0 38,162.0" fill="#d5d5cf" stroke="#ffffff" stroke-width="1"/>
+<text x="56" y="254.0" font-size="14.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">X</tspan> &#8712; &#8477;<tspan dy="-5.5" font-size="72%" font-style="italic">C&#215;H&#215;W</tspan><tspan dy="5.5">&#8203;</tspan></text>
+<text x="56" y="270.0" font-size="11.5" fill="#6b6b6b" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">all C bands</text>
+<path d="M92 196H116" fill="none" stroke="#444444" stroke-width="1.3"/>
+<path d="M116 196V78H146" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#bre-arr)"/>
+<path d="M116 196V304H229" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#bre-arr)"/>
+<text x="150" y="44" font-size="10.5" fill="#4a86c8" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif" font-weight="600" letter-spacing=".06em">SELECTED-BAND PATH</text>
+<rect x="150" y="60" width="122" height="36" rx="4" fill="#ffffff" stroke="#444444" stroke-width="1.2"/>
+<text x="211" y="82.5" font-size="12.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">Band selection </text>
+<path d="M272 78H304" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#bre-arr)"/>
+<polygon points="308,92.0 358,92.0 376,80.0 326,80.0" fill="#4a86c8" stroke="#ffffff" stroke-width="1"/><polygon points="308,84.0 358,84.0 376,72.0 326,72.0" fill="#4a86c8" stroke="#ffffff" stroke-width="1"/><polygon points="308,76.0 358,76.0 376,64.0 326,64.0" fill="#4a86c8" stroke="#ffffff" stroke-width="1"/>
+<text x="386" y="83" font-size="14.5" fill="#222222" text-anchor="start" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">X</tspan><tspan dy="4" font-size="72%">sel</tspan><tspan dy="-4">&#8203;</tspan> &#8712; &#8477;<tspan dy="-5.5" font-size="72%" font-style="italic">K&#215;H&#215;W</tspan><tspan dy="5.5">&#8203;</tspan></text>
+<path d="M488 78H820V183" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#bre-arr)"/>
+<text x="150" y="140" font-size="12.5" fill="#222222" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">Band-routed gates</text>
+<path transform="translate(265 127)" fill="#e2572b" d="M7 0.5C9.3 3.6 12.2 5.7 12.2 9.3A5.2 5.2 0 0 1 1.8 9.3C1.8 7.4 2.9 6.1 3.9 4.9C4.3 6.2 5 7 5.9 7.2C5.5 4.9 5.9 2.7 7 0.5Z"/>
+<text x="189.0" y="161" font-size="11" fill="#6b6b6b" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">1</text>
+<text x="227.0" y="161" font-size="11" fill="#6b6b6b" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">2</text>
+<text x="265.0" y="161" font-size="11" fill="#6b6b6b" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">&#8943;</text>
+<text x="303.0" y="161" font-size="11" fill="#6b6b6b" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">C</tspan></text>
+<text x="159" y="181" font-size="11" fill="#6b6b6b" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">1</text>
+<rect x="170" y="166" width="38" height="22" fill="#fdebe4" stroke="#d9582c" stroke-width=".8"/>
+<text x="189.0" y="181" font-size="11.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">G</tspan><tspan dy="3" font-size="72%">1,1</tspan><tspan dy="-3">&#8203;</tspan></text>
+<rect x="208" y="166" width="38" height="22" fill="#fdebe4" stroke="#d9582c" stroke-width=".8"/>
+<text x="227.0" y="181" font-size="11.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">G</tspan><tspan dy="3" font-size="72%">1,2</tspan><tspan dy="-3">&#8203;</tspan></text>
+<rect x="246" y="166" width="38" height="22" fill="#fdebe4" stroke="#d9582c" stroke-width=".8"/>
+<text x="265.0" y="181" font-size="11.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">&#8943;</text>
+<rect x="284" y="166" width="38" height="22" fill="#fdebe4" stroke="#d9582c" stroke-width=".8"/>
+<text x="303.0" y="181" font-size="11.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">G</tspan><tspan dy="3" font-size="72%" font-style="italic">1,C</tspan><tspan dy="-3">&#8203;</tspan></text>
+<text x="159" y="203" font-size="11" fill="#6b6b6b" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">2</text>
+<rect x="170" y="188" width="38" height="22" fill="#fdebe4" stroke="#d9582c" stroke-width=".8"/>
+<text x="189.0" y="203" font-size="11.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">G</tspan><tspan dy="3" font-size="72%">2,1</tspan><tspan dy="-3">&#8203;</tspan></text>
+<rect x="208" y="188" width="38" height="22" fill="#fdebe4" stroke="#d9582c" stroke-width=".8"/>
+<text x="227.0" y="203" font-size="11.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">G</tspan><tspan dy="3" font-size="72%">2,2</tspan><tspan dy="-3">&#8203;</tspan></text>
+<rect x="246" y="188" width="38" height="22" fill="#fdebe4" stroke="#d9582c" stroke-width=".8"/>
+<text x="265.0" y="203" font-size="11.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">&#8943;</text>
+<rect x="284" y="188" width="38" height="22" fill="#fdebe4" stroke="#d9582c" stroke-width=".8"/>
+<text x="303.0" y="203" font-size="11.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">G</tspan><tspan dy="3" font-size="72%" font-style="italic">2,C</tspan><tspan dy="-3">&#8203;</tspan></text>
+<text x="159" y="225" font-size="11" fill="#6b6b6b" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">&#8942;</text>
+<rect x="170" y="210" width="38" height="22" fill="#fdebe4" stroke="#d9582c" stroke-width=".8"/>
+<text x="189.0" y="225" font-size="11.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">&#8942;</text>
+<rect x="208" y="210" width="38" height="22" fill="#fdebe4" stroke="#d9582c" stroke-width=".8"/>
+<text x="227.0" y="225" font-size="11.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">&#8942;</text>
+<rect x="246" y="210" width="38" height="22" fill="#fdebe4" stroke="#d9582c" stroke-width=".8"/>
+<text x="265.0" y="225" font-size="11.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">&#8945;</text>
+<rect x="284" y="210" width="38" height="22" fill="#fdebe4" stroke="#d9582c" stroke-width=".8"/>
+<text x="303.0" y="225" font-size="11.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">&#8942;</text>
+<text x="159" y="247" font-size="11" fill="#6b6b6b" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">K</tspan></text>
+<rect x="170" y="232" width="38" height="22" fill="#fdebe4" stroke="#d9582c" stroke-width=".8"/>
+<text x="189.0" y="247" font-size="11.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">G</tspan><tspan dy="3" font-size="72%" font-style="italic">K,1</tspan><tspan dy="-3">&#8203;</tspan></text>
+<rect x="208" y="232" width="38" height="22" fill="#fdebe4" stroke="#d9582c" stroke-width=".8"/>
+<text x="227.0" y="247" font-size="11.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">G</tspan><tspan dy="3" font-size="72%" font-style="italic">K,2</tspan><tspan dy="-3">&#8203;</tspan></text>
+<rect x="246" y="232" width="38" height="22" fill="#fdebe4" stroke="#d9582c" stroke-width=".8"/>
+<text x="265.0" y="247" font-size="11.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">&#8943;</text>
+<rect x="284" y="232" width="38" height="22" fill="#fdebe4" stroke="#d9582c" stroke-width=".8"/>
+<text x="303.0" y="247" font-size="11.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">G</tspan><tspan dy="3" font-size="72%" font-style="italic">K,C</tspan><tspan dy="-3">&#8203;</tspan></text>
+<text x="336" y="190" font-size="14.5" fill="#222222" text-anchor="start" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">G</tspan> &#8712; &#8477;<tspan dy="-5.5" font-size="72%" font-style="italic">K&#215;C</tspan><tspan dy="5.5">&#8203;</tspan></text>
+<text x="336" y="214" font-size="13.5" fill="#222222" text-anchor="start" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">G</tspan><tspan dy="4" font-size="72%" font-style="italic">j,i</tspan><tspan dy="-4">&#8203;</tspan> = 2&#8201;sigmoid(<tspan font-style="italic">L</tspan><tspan dy="4" font-size="72%" font-style="italic">j,i</tspan><tspan dy="-4">&#8203;</tspan>)</text>
+<text x="336" y="234" font-size="11.5" fill="#6b6b6b" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">initialized to 1</text>
+<path d="M246 254V292" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#bre-arr)"/>
+<circle cx="246" cy="304" r="11" fill="#ffffff" stroke="#444444" stroke-width="1.3"/><path d="M241.6 299.6L250.4 308.4M241.6 308.4L250.4 299.6" fill="none" stroke="#444444" stroke-width="1.5"/>
+<path d="M257 304H288" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#bre-arr)"/>
+<polygon points="294,315.0 324,315.0 334,308.0 304,308.0" fill="#fbe3d8" stroke="#ffffff" stroke-width="1"/><polygon points="294,310.0 324,310.0 334,303.0 304,303.0" fill="#f3b79d" stroke="#ffffff" stroke-width="1"/><polygon points="294,305.0 324,305.0 334,298.0 304,298.0" fill="#f9d6c6" stroke="#ffffff" stroke-width="1"/><polygon points="294,300.0 324,300.0 334,293.0 304,293.0" fill="#f6c3ab" stroke="#ffffff" stroke-width="1"/>
+<polygon points="368,315.0 398,315.0 408,308.0 378,308.0" fill="#f6c3ab" stroke="#ffffff" stroke-width="1"/><polygon points="368,310.0 398,310.0 408,303.0 378,303.0" fill="#f9d6c6" stroke="#ffffff" stroke-width="1"/><polygon points="368,305.0 398,305.0 408,298.0 378,298.0" fill="#f3b79d" stroke="#ffffff" stroke-width="1"/><polygon points="368,300.0 398,300.0 408,293.0 378,293.0" fill="#fbe3d8" stroke="#ffffff" stroke-width="1"/>
+<text x="351" y="307" font-size="13" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">&#8943;</text>
+<text x="351" y="283.0" font-size="12.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">Gated pairs</text>
+<text x="314" y="333.0" font-size="12.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">U</tspan><tspan dy="4" font-size="72%">1</tspan><tspan dy="-4">&#8203;</tspan></text>
+<text x="388" y="333.0" font-size="12.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">U</tspan><tspan dy="4" font-size="72%" font-style="italic">K</tspan><tspan dy="-4">&#8203;</tspan></text>
+<text x="351" y="355.0" font-size="13.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">U</tspan> &#8712; &#8477;<tspan dy="-5.5" font-size="72%" font-style="italic">KC&#215;H&#215;W</tspan><tspan dy="5.5">&#8203;</tspan></text>
+<path d="M412 304H442" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#bre-arr)"/>
+<rect x="446" y="248" width="172" height="112" rx="4" fill="#ffffff" stroke="#d9582c" stroke-width="1.2"/>
+<circle cx="618" cy="248" r="9.5" fill="#ffffff"/><path transform="translate(611 240)" fill="#e2572b" d="M7 0.5C9.3 3.6 12.2 5.7 12.2 9.3A5.2 5.2 0 0 1 1.8 9.3C1.8 7.4 2.9 6.1 3.9 4.9C4.3 6.2 5 7 5.9 7.2C5.5 4.9 5.9 2.7 7 0.5Z"/>
+<text x="446" y="238" font-size="12.5" fill="#222222" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">Residual adapter </text>
+<text x="550" y="238" font-size="14.5" fill="#222222" text-anchor="start" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">R</tspan><tspan dy="4" font-size="72%" font-style="italic">&#952;</tspan><tspan dy="-4">&#8203;</tspan></text>
+<rect x="454" y="255" width="156" height="16" rx="2" fill="#f8cdb9" stroke="#d9582c" stroke-width="0.9"/>
+<text x="462" y="267" font-size="10.5" fill="#222222" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">Conv 1&#215;1</text>
+<text x="602" y="267" font-size="10.5" fill="#222222" text-anchor="end" font-family="Noto Sans, Helvetica, Arial, sans-serif">KC &#8594; 32</text>
+<rect x="454" y="275" width="156" height="16" rx="2" fill="#ffffff" stroke="#8b95a1" stroke-width="0.9"/>
+<text x="532.0" y="287" font-size="10.5" fill="#6b6b6b" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">GELU</text>
+<rect x="454" y="295" width="156" height="16" rx="2" fill="#f8cdb9" stroke="#d9582c" stroke-width="0.9"/>
+<text x="462" y="307" font-size="10.5" fill="#222222" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">Conv 1&#215;1</text>
+<text x="602" y="307" font-size="10.5" fill="#222222" text-anchor="end" font-family="Noto Sans, Helvetica, Arial, sans-serif">32 &#8594; 32</text>
+<rect x="454" y="315" width="156" height="16" rx="2" fill="#ffffff" stroke="#8b95a1" stroke-width="0.9"/>
+<text x="532.0" y="327" font-size="10.5" fill="#6b6b6b" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">GELU</text>
+<rect x="454" y="335" width="156" height="16" rx="2" fill="#f8cdb9" stroke="#d9582c" stroke-width="0.9"/>
+<text x="462" y="347" font-size="10.5" fill="#222222" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">Conv 1&#215;1</text>
+<text x="602" y="347" font-size="10.5" fill="#222222" text-anchor="end" font-family="Noto Sans, Helvetica, Arial, sans-serif">32 &#8594; K, zero-init</text>
+<path d="M618 304H648" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#bre-arr)"/>
+<polygon points="652,318.0 702,318.0 720,306.0 670,306.0" fill="#f3b79d" stroke="#ffffff" stroke-width="1"/><polygon points="652,310.0 702,310.0 720,298.0 670,298.0" fill="#f3b79d" stroke="#ffffff" stroke-width="1"/><polygon points="652,302.0 702,302.0 720,290.0 670,290.0" fill="#f3b79d" stroke="#ffffff" stroke-width="1"/>
+<text x="686" y="340.0" font-size="14.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">&#916;<tspan dy="4" font-size="72%" font-style="italic">&#952;</tspan><tspan dy="-4">&#8203;</tspan>(<tspan font-style="italic">X</tspan>) &#8712; &#8477;<tspan dy="-5.5" font-size="72%" font-style="italic">K&#215;H&#215;W</tspan><tspan dy="5.5">&#8203;</tspan></text>
+<path d="M724 304H820V209" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#bre-arr)"/>
+<text x="150" y="404" font-size="10.5" fill="#d9582c" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif" font-weight="600" letter-spacing=".06em">ALL-BAND RESIDUAL PATH</text>
+<circle cx="820" cy="196" r="12" fill="#ffffff" stroke="#444444" stroke-width="1.3"/><path d="M814.0 196H826.0M820 190.0V202.0" fill="none" stroke="#444444" stroke-width="1.5"/>
+<path d="M832 196H864" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#bre-arr)"/>
+<polygon points="868,210.0 918,210.0 936,198.0 886,198.0" fill="#4a86c8" stroke="#d9582c" stroke-width="1"/><polygon points="868,202.0 918,202.0 936,190.0 886,190.0" fill="#4a86c8" stroke="#d9582c" stroke-width="1"/><polygon points="868,194.0 918,194.0 936,182.0 886,182.0" fill="#4a86c8" stroke="#d9582c" stroke-width="1"/>
+<text x="902" y="172.0" font-size="12.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">Virtual image</text>
+<text x="902" y="232.0" font-size="14.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">X</tspan><tspan dy="4" font-size="72%">BRE</tspan><tspan dy="-4">&#8203;</tspan> &#8712; &#8477;<tspan dy="-5.5" font-size="72%" font-style="italic">K&#215;H&#215;W</tspan><tspan dy="5.5">&#8203;</tspan></text>
+<path d="M940 196H970" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#bre-arr)"/>
+<rect x="974" y="172" width="80" height="48" rx="4" fill="#e9edf1" stroke="#8b95a1" stroke-width="1.2"/>
+<circle cx="1054" cy="172" r="9.5" fill="#ffffff"/><g stroke="#2f7fd0" stroke-width="1.6" stroke-linecap="round"><path d="M1054 166.5V177.5M1049.2 169.25L1058.8 174.75M1049.2 174.75L1058.8 169.25"/></g>
+<text x="1014" y="194" font-size="12.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">Patch</text>
+<text x="1014" y="209" font-size="12.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">embedding</text>
+<text x="1014" y="242" font-size="14.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">E</tspan><tspan dy="4" font-size="72%">0</tspan><tspan dy="-4">&#8203;</tspan></text>
+<text x="948" y="298" font-size="15" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">X</tspan><tspan dy="4" font-size="72%">BRE</tspan><tspan dy="-4">&#8203;</tspan> = <tspan font-style="italic">X</tspan><tspan dy="4" font-size="72%">sel</tspan><tspan dy="-4">&#8203;</tspan> + &#916;<tspan dy="4" font-size="72%" font-style="italic">&#952;</tspan><tspan dy="-4">&#8203;</tspan>(<tspan font-style="italic">X</tspan>)</text>
+<text x="948" y="322" font-size="12.5" fill="#6b6b6b" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">&#916;<tspan dy="4" font-size="72%" font-style="italic">&#952;</tspan><tspan dy="-4">&#8203;</tspan> = 0 at init &#8658; <tspan font-style="italic">X</tspan><tspan dy="4" font-size="72%">BRE</tspan><tspan dy="-4">&#8203;</tspan> = <tspan font-style="italic">X</tspan><tspan dy="4" font-size="72%">sel</tspan><tspan dy="-4">&#8203;</tspan></text>
+<g stroke="#2f7fd0" stroke-width="1.6" stroke-linecap="round"><path d="M876 394.5V405.5M871.2 397.25L880.8 402.75M871.2 402.75L880.8 397.25"/></g><text x="887" y="404" font-size="11.5" fill="#6b6b6b" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">frozen</text><path transform="translate(937 392)" fill="#e2572b" d="M7 0.5C9.3 3.6 12.2 5.7 12.2 9.3A5.2 5.2 0 0 1 1.8 9.3C1.8 7.4 2.9 6.1 3.9 4.9C4.3 6.2 5 7 5.9 7.2C5.5 4.9 5.9 2.7 7 0.5Z"/><text x="955" y="404" font-size="11.5" fill="#6b6b6b" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">trained</text>
+</svg></div>
+      <figcaption>Band-Routed Embedding. Band selection provides the <i>K</i>-band anchor <i>X</i><sub>sel</sub>. In parallel, all <i>C</i> bands are weighted by a learned <i>K</i>&times;<i>C</i> gate table and passed through one shared residual adapter, giving a <i>K</i>-band correction that is zero at initialization. Their sum is the virtual image fed to the frozen patch embedding.</figcaption>
+    </figure>
+    <ol class="steps">
+      <li><b>Selected-band anchor.</b> Band selection picks the <i>K</i> downstream bands that best match the pretrained input slots, \(X_{\mathrm{sel}} = P_{\mathrm{sel}}(X)\). This keeps the input close to the distribution the pretrained patch embedding expects.</li>
+      <li><b>Band-routed gates.</b> A learned table \(G \in \mathbb{R}^{K\times C}\) with \(G_{j,i} = 2\,\mathrm{sigmoid}(L_{j,i})\) controls how much input band \(i\) contributes to virtual band \(j\). The logits start at zero, so every gate starts at 1 and no band is suppressed.</li>
+      <li><b>Shared residual adapter.</b> The \(K\!\cdot\!C\) gated channels pass through one compact 1&times;1 convolutional network that outputs a <i>K</i>-band correction \(\Delta_\theta(X)\). Its final layer is zero-initialized.</li>
+      <li><b>Virtual image.</b> \(X_{\mathrm{BRE}} = X_{\mathrm{sel}} + \Delta_\theta(X)\) has exactly <i>K</i> channels, so the pretrained patch embedding is used unchanged. No downstream band is hard-discarded: each one can influence every virtual band.</li>
+    </ol>
+
+    <h3>Stage-wise Transferability-aware LoRA (ST-LoRA)</h3>
+    <p>Uniform LoRA gives every stage the same rank. ST-LoRA runs a planner once, before fine-tuning, that measures how well each frozen encoder stage already transfers to the target task and then assigns each stage its own rank. The schedule stays fixed during training.</p>
+    <figure class="fig breakout">
+      <div class="diagram"><svg viewBox="0 14 1064 486" role="img" aria-label="Stage-wise Transferability-aware LoRA. The pretrained encoder's attention blocks, numbered 1 to 32, are grouped into four stages connected in series; the patch embedding and all four stages are frozen. Each stage has one trained LoRA adapter whose rank differs by stage (16, 32, 16, 16 in the example). Before fine-tuning, the ST-planner reads features from each stage, scores them with LogME, converts the scores to a transfer or repair signal, and allocates ranks under a total budget. The UPerNet decoder is trained.">
+<defs><marker id="st-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0.8 10 5 0 9.2z" fill="#444444"/></marker></defs>
+<path d="M2 130H20" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#st-arr)"/>
+<rect x="24" y="106" width="84" height="48" rx="4" fill="#e9edf1" stroke="#8b95a1" stroke-width="1.2"/>
+<circle cx="108" cy="106" r="9.5" fill="#ffffff"/><g stroke="#2f7fd0" stroke-width="1.6" stroke-linecap="round"><path d="M108 100.5V111.5M103.2 103.25L112.8 108.75M103.2 108.75L112.8 103.25"/></g>
+<text x="66" y="128" font-size="12.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">Patch</text>
+<text x="66" y="143" font-size="12.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">embedding</text>
+<rect x="134" y="30" width="696" height="178" rx="6" fill="#f8f9fa" stroke="#8b95a1" stroke-width="1.2"/>
+<text x="148" y="51" font-size="12.5" fill="#222222" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif" font-weight="600">Pretrained encoder</text>
+<text x="282" y="51" font-size="11.5" fill="#6b6b6b" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">attention blocks grouped into four stages, connected in series</text>
+<circle cx="830" cy="30" r="9.5" fill="#ffffff"/><g stroke="#2f7fd0" stroke-width="1.6" stroke-linecap="round"><path d="M830 24.5V35.5M825.2 27.25L834.8 32.75M825.2 32.75L834.8 27.25"/></g>
+<path d="M108 130H146" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#st-arr)"/>
+<rect x="146" y="64" width="150" height="132" rx="4" fill="#e9edf1" stroke="#8b95a1" stroke-width="1.2"/>
+<text x="158" y="82" font-size="12" fill="#222222" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif" font-weight="600">Stage 1</text>
+<rect x="158" y="90" width="126" height="20" rx="3" fill="#ffffff" stroke="#8b95a1" stroke-width="1"/>
+<text x="221.0" y="104" font-size="10.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">Attention block 1</text>
+<rect x="158" y="116" width="126" height="20" rx="3" fill="#ffffff" stroke="#8b95a1" stroke-width="1"/>
+<text x="221.0" y="130" font-size="10.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">Attention block 2</text>
+<rect x="158" y="164" width="126" height="20" rx="3" fill="#ffffff" stroke="#8b95a1" stroke-width="1"/>
+<text x="221.0" y="178" font-size="10.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">Attention block 8</text>
+<path d="M221.0 110V116M221.0 136V141M221.0 159V164" fill="none" stroke="#8b95a1" stroke-width="1"/>
+<text x="221.0" y="154" font-size="12" fill="#6b6b6b" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">&#8942;</text>
+<path d="M296 130H320" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#st-arr)"/>
+<rect x="320" y="64" width="150" height="132" rx="4" fill="#e9edf1" stroke="#8b95a1" stroke-width="1.2"/>
+<text x="332" y="82" font-size="12" fill="#222222" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif" font-weight="600">Stage 2</text>
+<rect x="332" y="90" width="126" height="20" rx="3" fill="#ffffff" stroke="#8b95a1" stroke-width="1"/>
+<text x="395.0" y="104" font-size="10.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">Attention block 9</text>
+<rect x="332" y="116" width="126" height="20" rx="3" fill="#ffffff" stroke="#8b95a1" stroke-width="1"/>
+<text x="395.0" y="130" font-size="10.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">Attention block 10</text>
+<rect x="332" y="164" width="126" height="20" rx="3" fill="#ffffff" stroke="#8b95a1" stroke-width="1"/>
+<text x="395.0" y="178" font-size="10.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">Attention block 16</text>
+<path d="M395.0 110V116M395.0 136V141M395.0 159V164" fill="none" stroke="#8b95a1" stroke-width="1"/>
+<text x="395.0" y="154" font-size="12" fill="#6b6b6b" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">&#8942;</text>
+<path d="M470 130H494" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#st-arr)"/>
+<rect x="494" y="64" width="150" height="132" rx="4" fill="#e9edf1" stroke="#8b95a1" stroke-width="1.2"/>
+<text x="506" y="82" font-size="12" fill="#222222" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif" font-weight="600">Stage 3</text>
+<rect x="506" y="90" width="126" height="20" rx="3" fill="#ffffff" stroke="#8b95a1" stroke-width="1"/>
+<text x="569.0" y="104" font-size="10.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">Attention block 17</text>
+<rect x="506" y="116" width="126" height="20" rx="3" fill="#ffffff" stroke="#8b95a1" stroke-width="1"/>
+<text x="569.0" y="130" font-size="10.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">Attention block 18</text>
+<rect x="506" y="164" width="126" height="20" rx="3" fill="#ffffff" stroke="#8b95a1" stroke-width="1"/>
+<text x="569.0" y="178" font-size="10.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">Attention block 24</text>
+<path d="M569.0 110V116M569.0 136V141M569.0 159V164" fill="none" stroke="#8b95a1" stroke-width="1"/>
+<text x="569.0" y="154" font-size="12" fill="#6b6b6b" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">&#8942;</text>
+<path d="M644 130H668" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#st-arr)"/>
+<rect x="668" y="64" width="150" height="132" rx="4" fill="#e9edf1" stroke="#8b95a1" stroke-width="1.2"/>
+<text x="680" y="82" font-size="12" fill="#222222" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif" font-weight="600">Stage 4</text>
+<rect x="680" y="90" width="126" height="20" rx="3" fill="#ffffff" stroke="#8b95a1" stroke-width="1"/>
+<text x="743.0" y="104" font-size="10.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">Attention block 25</text>
+<rect x="680" y="116" width="126" height="20" rx="3" fill="#ffffff" stroke="#8b95a1" stroke-width="1"/>
+<text x="743.0" y="130" font-size="10.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">Attention block 26</text>
+<rect x="680" y="164" width="126" height="20" rx="3" fill="#ffffff" stroke="#8b95a1" stroke-width="1"/>
+<text x="743.0" y="178" font-size="10.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">Attention block 32</text>
+<path d="M743.0 110V116M743.0 136V141M743.0 159V164" fill="none" stroke="#8b95a1" stroke-width="1"/>
+<text x="743.0" y="154" font-size="12" fill="#6b6b6b" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif">&#8942;</text>
+<path d="M818 130H860" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#st-arr)"/>
+<rect x="860" y="106" width="84" height="48" rx="4" fill="#fdebe4" stroke="#d9582c" stroke-width="1.2"/>
+<circle cx="944" cy="106" r="9.5" fill="#ffffff"/><path transform="translate(937 98)" fill="#e2572b" d="M7 0.5C9.3 3.6 12.2 5.7 12.2 9.3A5.2 5.2 0 0 1 1.8 9.3C1.8 7.4 2.9 6.1 3.9 4.9C4.3 6.2 5 7 5.9 7.2C5.5 4.9 5.9 2.7 7 0.5Z"/>
+<text x="902" y="128" font-size="12.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">UPerNet</text>
+<text x="902" y="143" font-size="12.5" fill="#222222" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">decoder</text>
+<path d="M944 130H974" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#st-arr)"/>
+<text x="988" y="135" font-size="14.5" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">&#374;</tspan></text>
+<path d="M186.0 196V240" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#st-arr)" marker-start="url(#st-arr)"/>
+<polygon points="154,240 183.0,250.6 183.0,265.4 154,276" fill="#fdebe4" stroke="#d9582c" stroke-width="1.2" stroke-linejoin="round"/><polygon points="189.0,250.6 218,240 218,276 189.0,265.4" fill="#fdebe4" stroke="#d9582c" stroke-width="1.2" stroke-linejoin="round"/><text x="165" y="262.5" font-size="12" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">A</tspan></text><text x="207" y="262.5" font-size="12" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">B</tspan></text>
+<path transform="translate(213 230)" fill="#e2572b" d="M7 0.5C9.3 3.6 12.2 5.7 12.2 9.3A5.2 5.2 0 0 1 1.8 9.3C1.8 7.4 2.9 6.1 3.9 4.9C4.3 6.2 5 7 5.9 7.2C5.5 4.9 5.9 2.7 7 0.5Z"/>
+<text x="228" y="255" font-size="12" fill="#222222" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">LoRA</text>
+<text x="228" y="272" font-size="13" fill="#222222" text-anchor="start" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">r</tspan><tspan dy="4" font-size="72%">1</tspan><tspan dy="-4">&#8203;</tspan> = 16</text>
+<path d="M186.0 330V276" fill="none" stroke="#444444" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#st-arr)"/>
+<path d="M282 196V330" fill="none" stroke="#444444" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#st-arr)"/>
+<text x="276" y="316" font-size="13.5" fill="#222222" text-anchor="end" font-family="STIX Two Text, Times New Roman, Times, serif">&#934;<tspan dy="4" font-size="72%">1</tspan><tspan dy="-4">&#8203;</tspan></text>
+<path d="M360.0 196V240" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#st-arr)" marker-start="url(#st-arr)"/>
+<polygon points="328,240 357.0,246.2 357.0,269.8 328,276" fill="#fdebe4" stroke="#d9582c" stroke-width="1.2" stroke-linejoin="round"/><polygon points="363.0,246.2 392,240 392,276 363.0,269.8" fill="#fdebe4" stroke="#d9582c" stroke-width="1.2" stroke-linejoin="round"/><text x="339" y="262.5" font-size="12" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">A</tspan></text><text x="381" y="262.5" font-size="12" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">B</tspan></text>
+<path transform="translate(387 230)" fill="#e2572b" d="M7 0.5C9.3 3.6 12.2 5.7 12.2 9.3A5.2 5.2 0 0 1 1.8 9.3C1.8 7.4 2.9 6.1 3.9 4.9C4.3 6.2 5 7 5.9 7.2C5.5 4.9 5.9 2.7 7 0.5Z"/>
+<text x="402" y="255" font-size="12" fill="#222222" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">LoRA</text>
+<text x="402" y="272" font-size="13" fill="#222222" text-anchor="start" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">r</tspan><tspan dy="4" font-size="72%">2</tspan><tspan dy="-4">&#8203;</tspan> = 32</text>
+<path d="M360.0 330V276" fill="none" stroke="#444444" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#st-arr)"/>
+<path d="M456 196V330" fill="none" stroke="#444444" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#st-arr)"/>
+<text x="450" y="316" font-size="13.5" fill="#222222" text-anchor="end" font-family="STIX Two Text, Times New Roman, Times, serif">&#934;<tspan dy="4" font-size="72%">2</tspan><tspan dy="-4">&#8203;</tspan></text>
+<path d="M534.0 196V240" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#st-arr)" marker-start="url(#st-arr)"/>
+<polygon points="502,240 531.0,250.6 531.0,265.4 502,276" fill="#fdebe4" stroke="#d9582c" stroke-width="1.2" stroke-linejoin="round"/><polygon points="537.0,250.6 566,240 566,276 537.0,265.4" fill="#fdebe4" stroke="#d9582c" stroke-width="1.2" stroke-linejoin="round"/><text x="513" y="262.5" font-size="12" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">A</tspan></text><text x="555" y="262.5" font-size="12" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">B</tspan></text>
+<path transform="translate(561 230)" fill="#e2572b" d="M7 0.5C9.3 3.6 12.2 5.7 12.2 9.3A5.2 5.2 0 0 1 1.8 9.3C1.8 7.4 2.9 6.1 3.9 4.9C4.3 6.2 5 7 5.9 7.2C5.5 4.9 5.9 2.7 7 0.5Z"/>
+<text x="576" y="255" font-size="12" fill="#222222" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">LoRA</text>
+<text x="576" y="272" font-size="13" fill="#222222" text-anchor="start" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">r</tspan><tspan dy="4" font-size="72%">3</tspan><tspan dy="-4">&#8203;</tspan> = 16</text>
+<path d="M534.0 330V276" fill="none" stroke="#444444" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#st-arr)"/>
+<path d="M630 196V330" fill="none" stroke="#444444" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#st-arr)"/>
+<text x="624" y="316" font-size="13.5" fill="#222222" text-anchor="end" font-family="STIX Two Text, Times New Roman, Times, serif">&#934;<tspan dy="4" font-size="72%">3</tspan><tspan dy="-4">&#8203;</tspan></text>
+<path d="M708.0 196V240" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#st-arr)" marker-start="url(#st-arr)"/>
+<polygon points="676,240 705.0,250.6 705.0,265.4 676,276" fill="#fdebe4" stroke="#d9582c" stroke-width="1.2" stroke-linejoin="round"/><polygon points="711.0,250.6 740,240 740,276 711.0,265.4" fill="#fdebe4" stroke="#d9582c" stroke-width="1.2" stroke-linejoin="round"/><text x="687" y="262.5" font-size="12" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">A</tspan></text><text x="729" y="262.5" font-size="12" fill="#222222" text-anchor="middle" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">B</tspan></text>
+<path transform="translate(735 230)" fill="#e2572b" d="M7 0.5C9.3 3.6 12.2 5.7 12.2 9.3A5.2 5.2 0 0 1 1.8 9.3C1.8 7.4 2.9 6.1 3.9 4.9C4.3 6.2 5 7 5.9 7.2C5.5 4.9 5.9 2.7 7 0.5Z"/>
+<text x="750" y="255" font-size="12" fill="#222222" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">LoRA</text>
+<text x="750" y="272" font-size="13" fill="#222222" text-anchor="start" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">r</tspan><tspan dy="4" font-size="72%">4</tspan><tspan dy="-4">&#8203;</tspan> = 16</text>
+<path d="M708.0 330V276" fill="none" stroke="#444444" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#st-arr)"/>
+<path d="M804 196V330" fill="none" stroke="#444444" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#st-arr)"/>
+<text x="798" y="316" font-size="13.5" fill="#222222" text-anchor="end" font-family="STIX Two Text, Times New Roman, Times, serif">&#934;<tspan dy="4" font-size="72%">4</tspan><tspan dy="-4">&#8203;</tspan></text>
+<text x="852" y="254" font-size="14" fill="#222222" text-anchor="start" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">h</tspan> = <tspan font-style="italic">W</tspan><tspan font-style="italic">x</tspan> + <tspan dy="0" font-size="72%"></tspan><tspan dy="-0">&#8203;</tspan>(&#945;&#8201;/&#8201;<tspan font-style="italic">r</tspan><tspan dy="4" font-size="72%">max</tspan><tspan dy="-4">&#8203;</tspan>)&#8201;<tspan font-style="italic">B</tspan><tspan dy="-5" font-size="72%" font-style="italic">(r)</tspan><tspan dy="5">&#8203;</tspan><tspan font-style="italic">A</tspan><tspan dy="-5" font-size="72%" font-style="italic">(r)</tspan><tspan dy="5">&#8203;</tspan><tspan font-style="italic">x</tspan></text>
+<text x="852" y="274" font-size="11" fill="#6b6b6b" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">W frozen &#183; A, B trained, cut to rank r</text>
+<rect x="134" y="330" width="696" height="138" rx="6" fill="#ffffff" stroke="#444444" stroke-width="1.2" stroke-dasharray="5 4"/>
+<text x="148" y="352" font-size="12.5" fill="#222222" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif" font-weight="600">ST-planner</text>
+<text x="226" y="352" font-size="11.5" fill="#6b6b6b" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">runs once, before fine-tuning</text>
+<text x="148" y="376" font-size="10" fill="#6b6b6b" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif" font-weight="600" letter-spacing=".08em">1  PROFILE</text>
+<text x="434" y="376" font-size="10" fill="#6b6b6b" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif" font-weight="600" letter-spacing=".08em">2  SIGNAL</text>
+<text x="634" y="376" font-size="10" fill="#6b6b6b" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif" font-weight="600" letter-spacing=".08em">3  ALLOCATE</text>
+<path d="M151 442H228" fill="none" stroke="#8b95a1" stroke-width="1"/><rect x="156" y="412.0" width="13" height="30.0" rx="1.5" fill="#8b95a1"/><text x="162.5" y="454" font-size="9.5" fill="#6b6b6b" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">1</text><rect x="174" y="402.0" width="13" height="40.0" rx="1.5" fill="#8b95a1"/><text x="180.5" y="454" font-size="9.5" fill="#6b6b6b" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">2</text><rect x="192" y="420.0" width="13" height="22.0" rx="1.5" fill="#8b95a1"/><text x="198.5" y="454" font-size="9.5" fill="#6b6b6b" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">3</text><rect x="210" y="428.0" width="13" height="14.0" rx="1.5" fill="#8b95a1"/><text x="216.5" y="454" font-size="9.5" fill="#6b6b6b" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">4</text>
+<text x="238" y="410" font-size="13.5" fill="#222222" text-anchor="start" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">q</tspan><tspan dy="4" font-size="72%" font-style="italic">s</tspan><tspan dy="-4">&#8203;</tspan> = LogME(&#934;<tspan dy="4" font-size="72%" font-style="italic">s</tspan><tspan dy="-4">&#8203;</tspan>(<tspan font-style="italic">X</tspan><tspan dy="4" font-size="72%">sel</tspan><tspan dy="-4">&#8203;</tspan>), <tspan font-style="italic">Y</tspan>)</text>
+<text x="238" y="430" font-size="11" fill="#6b6b6b" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">transferability of stage s</text>
+<path d="M402 414H424" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#st-arr)"/>
+<text x="434" y="402" font-size="13.5" fill="#222222" text-anchor="start" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">a</tspan><tspan dy="4" font-size="72%" font-style="italic">s</tspan><tspan dy="-4">&#8203;</tspan> = <tspan font-style="italic">q</tspan><tspan dy="4" font-size="72%" font-style="italic">s</tspan><tspan dy="-4">&#8203;</tspan>&#8195;<tspan font-family="Noto Sans, Helvetica, Arial, sans-serif" font-size="78%" fill="#6b6b6b">transfer</tspan></text>
+<text x="434" y="426" font-size="13.5" fill="#222222" text-anchor="start" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">a</tspan><tspan dy="4" font-size="72%" font-style="italic">s</tspan><tspan dy="-4">&#8203;</tspan> = max<tspan dy="4" font-size="72%" font-style="italic">t</tspan><tspan dy="-4">&#8203;</tspan> <tspan font-style="italic">q</tspan><tspan dy="4" font-size="72%" font-style="italic">t</tspan><tspan dy="-4">&#8203;</tspan> &#8722; <tspan font-style="italic">q</tspan><tspan dy="4" font-size="72%" font-style="italic">s</tspan><tspan dy="-4">&#8203;</tspan>&#8195;<tspan font-family="Noto Sans, Helvetica, Arial, sans-serif" font-size="78%" fill="#6b6b6b">repair</tspan></text>
+<text x="434" y="452" font-size="13.5" fill="#222222" text-anchor="start" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">w</tspan><tspan dy="4" font-size="72%" font-style="italic">s</tspan><tspan dy="-4">&#8203;</tspan> = softmax(<tspan font-style="italic">a</tspan><tspan dy="4" font-size="72%" font-style="italic">s</tspan><tspan dy="-4">&#8203;</tspan>&#8201;/&#8201;&#964;)</text>
+<path d="M602 414H624" fill="none" stroke="#444444" stroke-width="1.3" marker-end="url(#st-arr)"/>
+<text x="634" y="402" font-size="13.5" fill="#222222" text-anchor="start" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">r</tspan><tspan dy="4" font-size="72%" font-style="italic">s</tspan><tspan dy="-4">&#8203;</tspan> &#8712; {0, 4, 8, &#8230;, 2<tspan font-style="italic">r</tspan><tspan dy="4" font-size="72%">ref</tspan><tspan dy="-4">&#8203;</tspan>}</text>
+<text x="634" y="426" font-size="13.5" fill="#222222" text-anchor="start" font-family="STIX Two Text, Times New Roman, Times, serif"><tspan font-style="italic">r</tspan><tspan dy="4" font-size="72%" font-style="italic">s</tspan><tspan dy="-4">&#8203;</tspan> &#8776; <tspan font-style="italic">T</tspan><tspan dy="4" font-size="72%">rank</tspan><tspan dy="-4">&#8203;</tspan>&#8201;<tspan font-style="italic">w</tspan><tspan dy="4" font-size="72%" font-style="italic">s</tspan><tspan dy="-4">&#8203;</tspan></text>
+<text x="634" y="452" font-size="13.5" fill="#222222" text-anchor="start" font-family="STIX Two Text, Times New Roman, Times, serif">&#8721;<tspan dy="4" font-size="72%" font-style="italic">s</tspan><tspan dy="-4">&#8203;</tspan> <tspan font-style="italic">r</tspan><tspan dy="4" font-size="72%" font-style="italic">s</tspan><tspan dy="-4">&#8203;</tspan> &#8804; <tspan font-style="italic">T</tspan><tspan dy="4" font-size="72%">rank</tspan><tspan dy="-4">&#8203;</tspan> = <tspan font-style="italic">S</tspan>&#8201;<tspan font-style="italic">r</tspan><tspan dy="4" font-size="72%">ref</tspan><tspan dy="-4">&#8203;</tspan></text>
+<path d="M755 442H821" fill="none" stroke="#8b95a1" stroke-width="1"/><rect x="760" y="419.6" width="11" height="22.4" rx="1.5" fill="#d9582c"/><text x="765.5" y="454" font-size="9.5" fill="#6b6b6b" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">1</text><rect x="775" y="397.2" width="11" height="44.8" rx="1.5" fill="#d9582c"/><text x="780.5" y="454" font-size="9.5" fill="#6b6b6b" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">2</text><rect x="790" y="419.6" width="11" height="22.4" rx="1.5" fill="#d9582c"/><text x="795.5" y="454" font-size="9.5" fill="#6b6b6b" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">3</text><rect x="805" y="419.6" width="11" height="22.4" rx="1.5" fill="#d9582c"/><text x="810.5" y="454" font-size="9.5" fill="#6b6b6b" text-anchor="middle" font-family="Noto Sans, Helvetica, Arial, sans-serif">4</text>
+<g stroke="#2f7fd0" stroke-width="1.6" stroke-linecap="round"><path d="M134 478.5V489.5M129.2 481.25L138.8 486.75M129.2 486.75L138.8 481.25"/></g><text x="145" y="488" font-size="11.5" fill="#6b6b6b" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">frozen</text><path transform="translate(195 476)" fill="#e2572b" d="M7 0.5C9.3 3.6 12.2 5.7 12.2 9.3A5.2 5.2 0 0 1 1.8 9.3C1.8 7.4 2.9 6.1 3.9 4.9C4.3 6.2 5 7 5.9 7.2C5.5 4.9 5.9 2.7 7 0.5Z"/><text x="213" y="488" font-size="11.5" fill="#6b6b6b" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">trained</text><path d="M272 484H302" fill="none" stroke="#444444" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#st-arr)"/><text x="309" y="488" font-size="11.5" fill="#6b6b6b" text-anchor="start" font-family="Noto Sans, Helvetica, Arial, sans-serif">planning step</text>
+</svg></div>
+      <figcaption>ST-LoRA. All attention blocks of the pretrained encoder are grouped into four stages that run in series and stay frozen (block numbers are for a 32-block encoder, as in Fig. 2 of the paper). Each stage gets one LoRA adapter with its own rank; the ranks shown are the paper&rsquo;s example for ScaleMAE on Sen1Floods11. The ST-planner runs once before fine-tuning: it scores each stage&rsquo;s features with LogME and allocates the ranks under a total budget.</figcaption>
+    </figure>
+    <ol class="steps">
+      <li><b>Profile each stage.</b> The frozen encoder is split into \(S\) stages (four in our experiments). Using the selected-band input, patch features from each stage are scored against the labels with LogME: \(q_s = \mathrm{LogME}(\Phi_s(X_{\mathrm{sel}}), Y)\). No fine-tuning is involved.</li>
+      <li><b>Choose a planning signal.</b> <em>Transfer</em> mode gives more rank to stages that are already useful, \(a_s = q_s\). <em>Repair</em> mode gives more rank to stages with a larger transferability gap, \(a_s = \max_t q_t - q_s\).</li>
+      <li><b>Allocate under a budget.</b> Weights \(w_s = \exp(a_s/\tau) / \sum_t \exp(a_t/\tau)\) split a total rank budget \(T_{\mathrm{rank}} = S\,r_{\mathrm{ref}}\). Each share is quantized down to the grid \(\{0, 4, 8, \ldots, r_{\mathrm{ref}}/2, r_{\mathrm{ref}}, 2r_{\mathrm{ref}}\}\), then stages are upgraded greedily while \(\sum_s r_s \le T_{\mathrm{rank}}\).</li>
+      <li><b>Nested LoRA.</b> Each adapted layer holds one maximum-rank adapter that is truncated to its stage&rsquo;s rank; a stage with rank 0 gets no LoRA update. Pretrained encoder weights stay frozen, while BRE, the active LoRA weights, and the decoder are trained.</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ============================================================= demo -->
+<section class="section band" id="demo">
+  <div class="container wide">
+    <h2>Inference explorer</h2>
+    <p class="lead">Predictions from the checkpoints behind the paper&rsquo;s main table, on held-out test tiles. Pick a dataset, a GeoFM and a tile, then compare four fine-tuning methods on the same input.</p>
+    <div class="explorer" id="explorer"><p class="ex-error">Loading the explorer&hellip;</p></div>
+    <noscript><p class="ex-error">The explorer needs JavaScript. Figure 4 of the paper shows the same kind of comparison.</p></noscript>
+    <details class="how">
+      <summary>How these outputs were produced</summary>
+      <ul>
+        <li><b>Checkpoints.</b> Every panel comes from the seed-42, best-validation checkpoint of a run that enters Table 4 of the paper. Before export, all 48 checkpoints were re-evaluated on their full test split, and each reproduced its recorded test mIoU (largest difference 0.00005). Nothing is computed in your browser; the predictions are stored as images.</li>
+        <li><b>Tiles.</b> The 32 tiles, eight per dataset, are examples where SPECTRA helps; they are not a random sample. Test tiles qualify if at least 60% of the tile is labeled, and the foreground class covers between 1% and 90% of the labeled area (for crop type, at least three classes each cover 5%). Qualifying tiles are ranked by how many of the three GeoFMs reach a higher per-tile mIoU with SPECTRA than with LoRA-32 and band selection, then by the mean gain, and the top ones are shown. Qualifying tiles on which SPECTRA is ahead for all three GeoFMs: Sen1Floods11 8 of 20; FireScars 9 of 50; Landslide4Sense 35 of 162; SA Crop Type 88 of 625. The two Sen1Floods11 tiles from the paper&rsquo;s Fig. 4 are added and tagged. For the comparison over the whole test split, see the test-set line under each panel and the results table.</li>
+        <li><b>Two kinds of numbers.</b> The header above each prediction is that single tile&rsquo;s mIoU (and foreground IoU or pixel accuracy); the green figure beside SPECTRA is its gain over LoRA-32 on that tile. &ldquo;Test set&rdquo; under the panel is the paper&rsquo;s mean &plusmn; standard deviation over three seeds on the whole test split.</li>
+        <li><b>Crop size.</b> Tiles are the centre 224&times;224 pixels of each test image (128&times;128 for Landslide4Sense), the same centre crop used in evaluation. SatMAE was trained and evaluated on smaller centre crops (128 px, and 96 px for SA Crop Type). On Sen1Floods11 and FireScars it is run here on the full 224-px tile so the three GeoFMs can be compared on the same extent, as in the paper&rsquo;s Fig. 4; treat its per-tile numbers there as indicative. Over the whole test split, the seed-42 SatMAE checkpoints score -2.3 to -0.4 mIoU points differently at 224 px on Sen1Floods11 and +4.7 to +9.2 on FireScars, where the larger crop also scores different pixels. On SA Crop Type SatMAE does not carry over to the larger extent, so it is run on its native 96-px centre crop and its panels show predictions only inside that outlined box.</li>
+        <li><b>Imagery.</b> The models receive each band scaled between its 2nd and 98th percentile over the full test image. For display only, each band of the cropped tile is stretched once more between its 5th and 95th percentile, so that dark tiles stay readable; the paper&rsquo;s Fig. 4 uses the same display stretch for its Paraguay tile. Prediction overlays are always drawn on the true-colour composite.</li>
+        <li><b>Virtual image and residual.</b> &ldquo;Virtual image&rdquo; is the <i>K</i>-band image SPECTRA&rsquo;s input adapter passes to the frozen patch embedding, shown in its red, green and blue slots with the same display stretch as the input. &ldquo;Residual&rdquo; is the mean absolute change the residual path makes across the <i>K</i> bands; the darkest tone corresponds to 0.25 of the input range.</li>
+      </ul>
+    </details>
+  </div>
+</section>
+
+<!-- ============================================================= results -->
+<section class="section" id="results">
+  <div class="container">
+    <h2>Results</h2>
+    <p class="lead">Three EO-pretrained GeoFMs, four segmentation datasets, a shared UPerNet decoder, three seeds. All numbers below are from the paper.</p>
+
+    <h3>Main comparison</h3>
+    <p>SPECTRA reaches strong accuracy with only 3.29&ndash;7.73% trainable parameters. The gains are clearest for ScaleMAE and SatMAE, whose pretrained band interfaces differ most from the downstream sensors. On ScaleMAE, SPECTRA lifts Sen1Floods11 macro mIoU from 77.17 (LoRA-64) and 75.41 (full fine-tuning) to 85.45, and FireScars from 69.03 and 72.30 to 82.05.</p>
+    <div id="main-table">
+      <div class="ctl-row">
+        <div class="ctl"><span>GeoFM</span><div class="seg small" id="mt-geofm"></div></div>
+        <div class="ctl"><span>Metric (%)</span><div class="seg small" id="mt-metric"></div></div>
+      </div>
+      <div class="table-wrap"></div>
+    </div>
+    <p class="tnote">Test mean &plusmn; standard deviation over seeds 42&ndash;44 (Table 4 in the paper). Bold marks the best value in each column, leaving out full fine-tuning, which serves as a high-cost reference. FG IoU is foreground IoU.</p>
+
+    <figure class="fig" style="max-width:720px;margin:30px auto 0">
+      <a href="assets/img/fig4_qualitative.jpg"><img src="assets/img/fig4_qualitative.jpg" width="1600" height="2052" loading="lazy" alt="Prediction maps for two Sen1Floods11 test tiles, for Prithvi, ScaleMAE and SatMAE, each with LoRA-32, surgical fine-tuning, SPECTRA and full fine-tuning."></a>
+      <figcaption>Predictions for LoRA-32 with band selection, surgical tuning, SPECTRA and full fine-tuning on two Sen1Floods11 examples. Green, blue, and red denote true positives, false positives, and false negatives. (Fig. 4 in the paper; both tiles are in the explorer above.)</figcaption>
+    </figure>
+
+    <h3>Does extra-band embedding help?</h3>
+    <p>Averaged over three GeoFMs, four datasets and five fine-tuning policies, replacing band selection with BRE raises mean macro mIoU from 66.36 to 69.24 (+2.88 points). A direct MLP projector that also uses every band lowers it to 64.08 (&minus;2.28). Extra bands are useful, but the input adapter has to preserve the pretrained spectral interface: the MLP changes the input distribution before the pretrained patch embedding, so the model must relearn a spectral tokenizer while adapting to the task.</p>
+    <div class="table-wrap"><table class="ptable"><thead><tr><th>Fine-tuning method</th><th class="num"><i>n</i></th><th class="num">Band selection</th><th class="num">+ MLP</th><th class="num">+ BRE</th><th class="num">&Delta; MLP</th><th class="num">&Delta; BRE</th></tr></thead><tbody>
+<tr><td>LoRA-16</td><td class="num">12</td><td class="num">65.89</td><td class="num">64.26</td><td class="num best">68.95</td><td class="num neg">&minus;1.63</td><td class="num best">+3.06</td></tr>
+<tr><td>LoRA-32</td><td class="num">12</td><td class="num">66.32</td><td class="num">63.59</td><td class="num best">68.90</td><td class="num neg">&minus;2.73</td><td class="num best">+2.59</td></tr>
+<tr><td>LoRA-64</td><td class="num">12</td><td class="num">66.45</td><td class="num">63.84</td><td class="num best">69.30</td><td class="num neg">&minus;2.61</td><td class="num best">+2.85</td></tr>
+<tr><td>Surgical</td><td class="num">12</td><td class="num">65.37</td><td class="num">63.20</td><td class="num best">68.84</td><td class="num neg">&minus;2.16</td><td class="num best">+3.48</td></tr>
+<tr><td>Full-FT</td><td class="num">12</td><td class="num">67.77</td><td class="num">65.49</td><td class="num best">70.20</td><td class="num neg">&minus;2.28</td><td class="num best">+2.43</td></tr>
+</tbody></table></div>
+    <p class="tnote">Average test macro mIoU (%) over <i>n</i> matched GeoFM&ndash;dataset pairs; deltas are relative to band selection with the same fine-tuning method (Table 5 in the paper).</p>
+    <p style="margin-top:18px">The pattern holds per cell. Across the 60 paired baseline-policy cells, BRE improves foreground F1 in 56, by +3.08 F1 points on average; foreground IoU rises by +4.15 points on average. The largest gains appear where band selection throws away the most, such as ScaleMAE on Sen1Floods11 and FireScars.</p>
+    <figure class="fig card">
+      <a href="assets/img/fig5_bre_grouped_fg_f1.png"><img src="assets/img/fig5_bre_grouped_fg_f1.png" width="2200" height="1787" loading="lazy" alt="Grouped bar charts of foreground F1 for each dataset and GeoFM. For every fine-tuning method, a hatched bar shows band selection and a solid bar of the same colour shows the method with BRE; orange bars show full SPECTRA."></a>
+      <figcaption>Band selection (hatched) against BRE (solid) for each fine-tuning method, by foreground F1. Orange bars are the full SPECTRA pipeline with BRE and ST-LoRA. (Fig. 5 in the paper.)</figcaption>
+    </figure>
+
+    <h3>Does ST-LoRA select useful stage-wise ranks?</h3>
+    <div class="figrow">
+      <figure class="fig card">
+        <a href="assets/img/fig6_accuracy_cost.png"><img src="assets/img/fig6_accuracy_cost.png" width="1500" height="2321" loading="lazy" alt="Twelve small plots, one per GeoFM and dataset, of macro mIoU against the percentage of trainable parameters for linear probing, uniform LoRA ranks, surgical tuning, SPECTRA and full fine-tuning."></a>
+        <figcaption>Accuracy against trainable parameters for every GeoFM&ndash;dataset pair. (Fig. 6 in the paper.)</figcaption>
+      </figure>
+      <div>
+        <p>Each panel plots macro mIoU against the share of trainable parameters. Points further left train fewer parameters; points higher are more accurate. SPECTRA generally sits far left of full fine-tuning and surgical tuning while staying competitive with, or above, nearby LoRA ranks.</p>
+        <p>The table below isolates rank allocation on Sen1Floods11. Rows M1&ndash;M8 are manually designed schedules with different depth preferences and budgets; the highlighted row is chosen by the ST-LoRA planner. A larger rank budget does not automatically give better accuracy, and the planner lands on an efficient schedule without searching the \(|\mathcal{R}|^S\) possible rank combinations.</p>
+      </div>
+    </div>
+    <div class="table-wrap"><table class="ptable"><thead><tr><th>Schedule</th><th>Ranks, stage 1&rarr;4</th><th class="num">Rank budget</th><th class="num">Trainable params</th><th class="num">Macro mIoU (%)</th></tr></thead><tbody>
+<tr class="group"><th colspan="5">GeoFM: Prithvi-EO-2.0 600M</th></tr>
+<tr><td>Manual M1</td><td><span class="rankbars" aria-hidden="true"><i style="height:2px" title="stage 1: rank 4"></i><i style="height:2px" title="stage 2: rank 4"></i><i style="height:3px" title="stage 3: rank 8"></i><i style="height:6px" title="stage 4: rank 16"></i></span> [4, 4, 8, 16]</td><td class="num">32</td><td class="num">23.94M</td><td class="num">86.58 ± 0.71</td></tr>
+<tr><td>Manual M2</td><td><span class="rankbars" aria-hidden="true"><i style="height:6px" title="stage 1: rank 16"></i><i style="height:3px" title="stage 2: rank 8"></i><i style="height:2px" title="stage 3: rank 4"></i><i style="height:2px" title="stage 4: rank 4"></i></span> [16, 8, 4, 4]</td><td class="num">32</td><td class="num">23.94M</td><td class="num">84.98 ± 2.37</td></tr>
+<tr><td>Manual M3</td><td><span class="rankbars" aria-hidden="true"><i style="height:3px" title="stage 1: rank 8"></i><i style="height:6px" title="stage 2: rank 16"></i><i style="height:6px" title="stage 3: rank 16"></i><i style="height:3px" title="stage 4: rank 8"></i></span> [8, 16, 16, 8]</td><td class="num">48</td><td class="num">26.57M</td><td class="num">85.85 ± 2.13</td></tr>
+<tr><td>Manual M4</td><td><span class="rankbars" aria-hidden="true"><i style="height:2px" title="stage 1: rank 4"></i><i style="height:3px" title="stage 2: rank 8"></i><i style="height:6px" title="stage 3: rank 16"></i><i style="height:11px" title="stage 4: rank 32"></i></span> [4, 8, 16, 32]</td><td class="num">60</td><td class="num">28.53M</td><td class="num">85.85 ± 1.47</td></tr>
+<tr><td>Manual M5</td><td><span class="rankbars" aria-hidden="true"><i style="height:11px" title="stage 1: rank 32"></i><i style="height:6px" title="stage 2: rank 16"></i><i style="height:6px" title="stage 3: rank 16"></i><i style="height:3px" title="stage 4: rank 8"></i></span> [32, 16, 16, 8]</td><td class="num">72</td><td class="num">30.50M</td><td class="num">85.02 ± 2.39</td></tr>
+<tr><td>Manual M6</td><td><span class="rankbars" aria-hidden="true"><i style="height:3px" title="stage 1: rank 8"></i><i style="height:6px" title="stage 2: rank 16"></i><i style="height:8px" title="stage 3: rank 24"></i><i style="height:11px" title="stage 4: rank 32"></i></span> [8, 16, 24, 32]</td><td class="num">80</td><td class="num">31.81M</td><td class="num">85.22 ± 1.89</td></tr>
+<tr><td>Manual M7</td><td><span class="rankbars" aria-hidden="true"><i style="height:2px" title="stage 1: rank 4"></i><i style="height:3px" title="stage 2: rank 8"></i><i style="height:6px" title="stage 3: rank 16"></i><i style="height:22px" title="stage 4: rank 64"></i></span> [4, 8, 16, 64]</td><td class="num">92</td><td class="num">33.77M</td><td class="num">86.05 ± 1.05</td></tr>
+<tr><td>Manual M8</td><td><span class="rankbars" aria-hidden="true"><i style="height:22px" title="stage 1: rank 64"></i><i style="height:11px" title="stage 2: rank 32"></i><i style="height:6px" title="stage 3: rank 16"></i><i style="height:3px" title="stage 4: rank 8"></i></span> [64, 32, 16, 8]</td><td class="num">120</td><td class="num">38.36M</td><td class="num">85.15 ± 2.89</td></tr>
+<tr class="ours"><td>ST-LoRA planner</td><td><span class="rankbars" aria-hidden="true"><i style="height:3px" title="stage 1: rank 8"></i><i style="height:6px" title="stage 2: rank 16"></i><i style="height:6px" title="stage 3: rank 16"></i><i style="height:3px" title="stage 4: rank 8"></i></span> [8, 16, 16, 8]</td><td class="num">48</td><td class="num">26.35M</td><td class="num">85.88 ± 1.24</td></tr>
+<tr class="group"><th colspan="5">GeoFM: ScaleMAE</th></tr>
+<tr><td>Manual M1</td><td><span class="rankbars" aria-hidden="true"><i style="height:2px" title="stage 1: rank 4"></i><i style="height:2px" title="stage 2: rank 4"></i><i style="height:3px" title="stage 3: rank 8"></i><i style="height:6px" title="stage 4: rank 16"></i></span> [4, 4, 8, 16]</td><td class="num">32</td><td class="num">18.23M</td><td class="num">85.27 ± 1.77</td></tr>
+<tr><td>Manual M2</td><td><span class="rankbars" aria-hidden="true"><i style="height:6px" title="stage 1: rank 16"></i><i style="height:3px" title="stage 2: rank 8"></i><i style="height:2px" title="stage 3: rank 4"></i><i style="height:2px" title="stage 4: rank 4"></i></span> [16, 8, 4, 4]</td><td class="num">32</td><td class="num">18.23M</td><td class="num">84.98 ± 1.82</td></tr>
+<tr><td>Manual M3</td><td><span class="rankbars" aria-hidden="true"><i style="height:3px" title="stage 1: rank 8"></i><i style="height:6px" title="stage 2: rank 16"></i><i style="height:6px" title="stage 3: rank 16"></i><i style="height:3px" title="stage 4: rank 8"></i></span> [8, 16, 16, 8]</td><td class="num">48</td><td class="num">19.80M</td><td class="num">84.63 ± 1.75</td></tr>
+<tr><td>Manual M4</td><td><span class="rankbars" aria-hidden="true"><i style="height:2px" title="stage 1: rank 4"></i><i style="height:3px" title="stage 2: rank 8"></i><i style="height:6px" title="stage 3: rank 16"></i><i style="height:11px" title="stage 4: rank 32"></i></span> [4, 8, 16, 32]</td><td class="num">60</td><td class="num">20.98M</td><td class="num">85.15 ± 1.83</td></tr>
+<tr><td>Manual M5</td><td><span class="rankbars" aria-hidden="true"><i style="height:11px" title="stage 1: rank 32"></i><i style="height:6px" title="stage 2: rank 16"></i><i style="height:6px" title="stage 3: rank 16"></i><i style="height:3px" title="stage 4: rank 8"></i></span> [32, 16, 16, 8]</td><td class="num">72</td><td class="num">22.16M</td><td class="num">84.99 ± 1.67</td></tr>
+<tr><td>Manual M6</td><td><span class="rankbars" aria-hidden="true"><i style="height:3px" title="stage 1: rank 8"></i><i style="height:6px" title="stage 2: rank 16"></i><i style="height:8px" title="stage 3: rank 24"></i><i style="height:11px" title="stage 4: rank 32"></i></span> [8, 16, 24, 32]</td><td class="num">80</td><td class="num">22.95M</td><td class="num">85.25 ± 1.68</td></tr>
+<tr><td>Manual M7</td><td><span class="rankbars" aria-hidden="true"><i style="height:2px" title="stage 1: rank 4"></i><i style="height:3px" title="stage 2: rank 8"></i><i style="height:6px" title="stage 3: rank 16"></i><i style="height:22px" title="stage 4: rank 64"></i></span> [4, 8, 16, 64]</td><td class="num">92</td><td class="num">24.13M</td><td class="num">85.12 ± 1.89</td></tr>
+<tr><td>Manual M8</td><td><span class="rankbars" aria-hidden="true"><i style="height:22px" title="stage 1: rank 64"></i><i style="height:11px" title="stage 2: rank 32"></i><i style="height:6px" title="stage 3: rank 16"></i><i style="height:3px" title="stage 4: rank 8"></i></span> [64, 32, 16, 8]</td><td class="num">120</td><td class="num">26.88M</td><td class="num">85.01 ± 1.59</td></tr>
+<tr class="ours"><td>ST-LoRA planner</td><td><span class="rankbars" aria-hidden="true"><i style="height:6px" title="stage 1: rank 16"></i><i style="height:11px" title="stage 2: rank 32"></i><i style="height:6px" title="stage 3: rank 16"></i><i style="height:6px" title="stage 4: rank 16"></i></span> [16, 32, 16, 16]</td><td class="num">80</td><td class="num">22.95M</td><td class="num">85.29 ± 2.17</td></tr>
+</tbody></table></div>
+    <p class="tnote">Stage-wise LoRA with BRE on Sen1Floods11; bars sketch the rank per stage (Table 6 in the paper).</p>
+  </div>
+</section>
+
+<!-- ============================================================= limits -->
+<section class="section band" id="limits">
+  <div class="container">
+    <h2>Scope and limits</h2>
+    <ul class="limits">
+      <li><b>BRE helps when band selection discards something useful.</b> If spectral mismatch is low and band selection is already strong, the safest default may be to keep it. Prithvi-EO-2.0 on FireScars shows the boundary: both sides use the same six HLS bands, there is nothing for BRE to recover, and uniform LoRA-64 and full fine-tuning remain stronger there.</li>
+      <li><b>Gains are not universal.</b> Their size changes with the backbone and the task, and a small number of cells are negative. SPECTRA is a strong low-cost alternative when spectral adaptation is beneficial, not a universal replacement for high-capacity encoder adaptation.</li>
+      <li><b>Rank-planner evidence is strongest on Sen1Floods11.</b> Broader validation of the planner across all downstream datasets is still needed before claiming universal parameter-efficiency gains.</li>
+      <li><b>This is a controlled comparison, not a leaderboard entry.</b> All runs share constrained hyperparameters and a common UPerNet decoder so that methods can be compared fairly; the paper&rsquo;s Appendix C relates them to published task-specific Prithvi-EO-2.0 results.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============================================================= quick start -->
+<section class="section" id="quickstart">
+  <div class="container">
+    <h2>Quick start</h2>
+    <p>Install the package, point it at your datasets, and fine-tune. Full setup, dataset sources and every baseline command are in the <a href="https://github.com/big-data-lab-umbc/SPECTRA#readme">README</a>; the hyperparameters behind each table row are in the <a href="https://github.com/big-data-lab-umbc/SPECTRA/blob/main/appendix_experiment_hyperparameters.md">hyperparameter appendix</a>.</p>
+<pre><code>git clone https://github.com/big-data-lab-umbc/SPECTRA.git
+cd SPECTRA
+pip install -e .
+
+# where the Sen1Floods11 hand-labeled data lives
+export SPECTRA_SEN1FLOODS11_ROOT=/path/to/sen1floods11</code></pre>
+    <p>SPECTRA (BRE + ST-LoRA) on Prithvi-EO-2.0 600M and Sen1Floods11:</p>
+<pre><code>CUDA_VISIBLE_DEVICES=0 python scripts/finetune.py \
+  --config configs/prithvi_sen1floods11.yaml \
+  --method spectra \
+  --st-planner repair \
+  --seed 42 --split-seed 42 \
+  --loss-mode ce_dice_dwa \
+  --save-checkpoints</code></pre>
+    <p>The matched LoRA-32 baseline with band selection:</p>
+<pre><code>CUDA_VISIBLE_DEVICES=0 python scripts/finetune.py \
+  --config configs/prithvi_sen1floods11.yaml \
+  --method lora32 \
+  --seed 42 --split-seed 42 \
+  --loss-mode ce_dice_dwa \
+  --save-checkpoints</code></pre>
+  </div>
+</section>
+
+<!-- ============================================================= citation -->
+<section class="section band" id="citation">
+  <div class="container">
+    <h2>BibTeX</h2>
+    <div class="bibwrap">
+      <button class="copy" id="copy-bib" type="button">Copy</button>
+<pre id="bibtex">@inproceedings{li2026spectra,
+  title     = {SPECTRA: Band-Routed Embedding and Stage-Wise LoRA for Cross-Sensor Fine-Tuning of Geospatial Foundation Models},
+  author    = {Li, Xingyan and Caraballo-Vega, Jordan A. and Gong, Jie and Carroll, Mark L. and Wang, Jianwu},
+  booktitle = {The 34th ACM International Conference on Advances in Geographic Information Systems (SIGSPATIAL '26)},
+  year      = {2026},
+  address   = {Riverside, CA, USA},
+  publisher = {ACM},
+  doi       = {10.1145/3841645.3842981},
+  eprint    = {2608.01751},
+  archivePrefix = {arXiv}
+}</pre>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <p><a href="https://arxiv.org/abs/2608.01751">arXiv:2608.01751</a> &middot; <a href="https://doi.org/10.1145/3841645.3842981">doi:10.1145/3841645.3842981</a> &middot; <a href="https://github.com/big-data-lab-umbc/SPECTRA">github.com/big-data-lab-umbc/SPECTRA</a></p>
+    <p>Paper released under CC BY 4.0; code under the MIT License. Page layout follows the familiar academic project-page format popularized by <a href="https://nerfies.github.io/">Nerfies</a>.</p>
+  </div>
+</footer>
+
+<script src="assets/data/paper.js"></script>
+<script src="assets/demo/manifest.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/explorer.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body,{delimiters:[{left:'\\(',right:'\\)',display:false}]})"></script>
+</body>
+</html>

@@ -1,7 +1,21 @@
 # SPECTRA
 
-This repository contains the publishable implementation of **SPECTRA** for
-segmentation fine-tuning of geospatial foundation models.
+**SPECTRA: Band-Routed Embedding and Stage-Wise LoRA for Cross-Sensor Fine-Tuning of Geospatial Foundation Models**
+
+Xingyan Li<sup>1</sup>, Jordan A. Caraballo-Vega<sup>2</sup>, Jie Gong<sup>2</sup>, Mark L. Carroll<sup>2</sup>, Jianwu Wang<sup>1</sup><br>
+<sup>1</sup>University of Maryland, Baltimore County &nbsp; <sup>2</sup>NASA Goddard Space Flight Center
+
+ACM SIGSPATIAL 2026, Research Track
+
+[Project page and inference explorer](https://big-data-lab-umbc.github.io/SPECTRA/) |
+[Paper (arXiv:2608.01751)](https://arxiv.org/abs/2608.01751) |
+[DOI 10.1145/3841645.3842981](https://doi.org/10.1145/3841645.3842981)
+
+![SPECTRA architecture: Band-Routed Embedding feeds a frozen patch embedding and a four-stage encoder with stage-wise LoRA; the ST-planner assigns the LoRA ranks](docs/assets/img/fig2_architecture.png)
+
+This repository contains the implementation of **SPECTRA**, a parameter-efficient
+fine-tuning framework for segmentation with EO-pretrained geospatial foundation
+models (GeoFMs) whose pretrained band interface does not match the downstream sensor.
 
 SPECTRA combines:
 
@@ -21,6 +35,34 @@ table:
 - `surgical`
 - `full_ft`
 - `spectra` = BRE + ST-LoRA
+
+## Results
+
+Test macro mIoU (%), mean ± standard deviation over seeds 42-44, from Table 4 of the paper.
+LoRA-32 and Full-FT use band selection; Full-FT is a high-cost reference. Bold marks the
+better of the two parameter-efficient methods.
+
+| GeoFM | Dataset | LoRA-32 | Full-FT | SPECTRA | SPECTRA trainable params |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Prithvi-EO-2.0 600M | Sen1Floods11 | 85.10 ± 1.70 | 86.24 ± 2.95 | **86.39 ± 0.85** | 4.06% |
+| Prithvi-EO-2.0 600M | FireScars | **85.47 ± 0.35** | 87.71 ± 1.13 | 85.40 ± 0.33 | 5.31% |
+| Prithvi-EO-2.0 600M | Landslide4Sense | 77.07 ± 0.05 | 77.25 ± 0.08 | **77.28 ± 0.09** | 3.29% |
+| Prithvi-EO-2.0 600M | SA Crop Type | 35.61 ± 0.56 | 37.63 ± 1.01 | **36.32 ± 0.63** | 5.31% |
+| ScaleMAE | Sen1Floods11 | 77.07 ± 2.05 | 75.41 ± 0.99 | **85.45 ± 2.08** | 7.23% |
+| ScaleMAE | FireScars | 68.20 ± 1.89 | 72.30 ± 1.39 | **82.05 ± 2.07** | 7.48% |
+| ScaleMAE | Landslide4Sense | 75.16 ± 0.28 | 75.36 ± 0.07 | **76.33 ± 0.06** | 6.20% |
+| ScaleMAE | SA Crop Type | 31.90 ± 0.34 | 33.22 ± 0.52 | **31.97 ± 0.30** | 7.56% |
+| SatMAE | Sen1Floods11 | 84.95 ± 1.82 | 85.94 ± 2.08 | **87.19 ± 0.82** | 6.49% |
+| SatMAE | FireScars | 64.97 ± 0.30 | 71.61 ± 0.71 | **68.37 ± 1.53** | 7.73% |
+| SatMAE | Landslide4Sense | 77.56 ± 0.16 | 77.26 ± 0.13 | **78.26 ± 0.13** | 6.36% |
+| SatMAE | SA Crop Type | 32.77 ± 0.41 | 33.30 ± 1.12 | **33.39 ± 0.47** | 7.73% |
+
+SPECTRA trains 3.29-7.73% of the parameters. Across five fine-tuning policies and 60 matched
+configurations, replacing band selection with BRE raises mean macro mIoU by +2.88 points.
+Gains are largest where band selection discards many downstream bands (ScaleMAE) and small
+where the bands already match (Prithvi-EO-2.0 on FireScars). The paper and the
+[project page](https://big-data-lab-umbc.github.io/SPECTRA/) have the full comparison,
+including LP, LoRA-16/64 and surgical fine-tuning.
 
 ## Installation
 
@@ -119,6 +161,32 @@ For Prithvi + FireScars, where the target input bands already match the
 pretrained 6-band patch embedding, `spectra` automatically bypasses BRE and
 runs native patch embedding + ST-LoRA.
 
+## Project page
+
+The static project page lives in [`docs/`](docs/) and is served with GitHub Pages. To preview it
+locally, serve the folder over HTTP (the inference explorer reads image pixels, which browsers
+block for pages opened from disk):
+
+```bash
+cd docs && python3 -m http.server 8000
+```
+
+## Citation
+
+```bibtex
+@inproceedings{li2026spectra,
+  title     = {SPECTRA: Band-Routed Embedding and Stage-Wise LoRA for Cross-Sensor Fine-Tuning of Geospatial Foundation Models},
+  author    = {Li, Xingyan and Caraballo-Vega, Jordan A. and Gong, Jie and Carroll, Mark L. and Wang, Jianwu},
+  booktitle = {The 34th ACM International Conference on Advances in Geographic Information Systems (SIGSPATIAL '26)},
+  year      = {2026},
+  address   = {Riverside, CA, USA},
+  publisher = {ACM},
+  doi       = {10.1145/3841645.3842981},
+  eprint    = {2608.01751},
+  archivePrefix = {arXiv}
+}
+```
+
 ## References
 
 SPECTRA reuses public backbone, decoder, and adaptation implementations instead
@@ -135,3 +203,7 @@ of vendoring them into this repository.
 | TorchGeo Scale-MAE | https://github.com/torchgeo/torchgeo/blob/main/torchgeo/models/scale_mae.py | `scalemae_fmow_rgb` wrapper in `spectra/backbone/scalemae.py` |
 | LoRA reference implementation | https://github.com/microsoft/LoRA | LoRA adaptation design reference for `spectra/adapter/nested_lora.py` |
 | LogME reference implementation | https://github.com/thuml/LogME | Transferability scoring reference for `spectra/planner/logme_profiler.py` |
+
+## License
+
+Released under the [MIT License](LICENSE).
