@@ -40,7 +40,7 @@
     [0, 131, 0], [98, 80, 214], [227, 73, 72], [138, 90, 43]];
   var ERR_RGB = [226, 0, 116];
 
-  var state = { ds: 'sen1floods11', bb: 'scalemae', tile: 0, view: 'rgb', band: null, overlay: 'errors', alpha: 0.75, showLabel: false };
+  var state = { ds: 'sen1floods11', bb: 'scalemae', tile: 0, view: 'rgb', band: null, overlay: 'errors', alpha: 0.75, showLabel: true };
 
   /* ------------------------------------------------------------ DOM skeleton */
   root.innerHTML =
@@ -66,7 +66,7 @@
     '<div class="ex-under">' +
     '  <div class="ctl"><span>Overlay</span><div class="seg small" id="ex-ov"></div>' +
     '    <label style="font-size:.84rem;color:#6b6b6b">opacity <input type="range" id="ex-alpha" min="0.2" max="1" step="0.05" value="0.75" aria-label="Overlay opacity"></label>' +
-    '    <label style="font-size:.84rem;color:#6b6b6b"><input type="checkbox" id="ex-gt"> show label on input</label></div>' +
+    '    <label style="font-size:.84rem;color:#6b6b6b"><input type="checkbox" id="ex-gt" checked> show label on input</label></div>' +
     '  <div class="ex-legend" id="ex-legend"></div>' +
     '</div>' +
     '<p class="ex-status" id="ex-status" aria-live="polite"></p>' +
@@ -219,7 +219,8 @@
     $('ex-predname').textContent = BB_LABEL[state.bb] + ' · ' + I.label + ' · ' + T.name + (T.in_paper ? ' (in the paper’s Fig. 4)' : '');
     var names = { rgb: 'True colour', cir: 'Colour infrared (NIR, red, green)', swir: 'SWIR composite (SWIR, NIR, red)',
       bre: 'Virtual image the ' + BB_LABEL[state.bb] + ' patch embedding receives', delta: 'Mean |Δ| the residual path adds' };
-    $('ex-viewname').textContent = state.view === 'band' ? 'Band ' + state.band + ': ' + UI.longBand(P.targetBands[I.label][state.band]) : names[state.view];
+    $('ex-viewname').textContent = (state.view === 'band' ? 'Band ' + state.band + ': ' + UI.longBand(P.targetBands[I.label][state.band]) : names[state.view]) +
+      (state.showLabel ? ' · label overlaid' : '');
   }
 
   /* ------------------------------------------------------------ controls */
