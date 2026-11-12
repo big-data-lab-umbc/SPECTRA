@@ -1,0 +1,46 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the paper below."
+title: "SPECTRA"
+type: software
+license: MIT
+repository-code: "https://github.com/big-data-lab-umbc/SPECTRA"
+url: "https://big-data-lab-umbc.github.io/SPECTRA/"
+authors:
+  - family-names: Li
+    given-names: Xingyan
+  - family-names: Caraballo-Vega
+    given-names: Jordan A.
+  - family-names: Gong
+    given-names: Jie
+  - family-names: Carroll
+    given-names: Mark L.
+  - family-names: Wang
+    given-names: Jianwu
+preferred-citation:
+  type: conference-paper
+  title: "SPECTRA: Band-Routed Embedding and Stage-Wise LoRA for Cross-Sensor Fine-Tuning of Geospatial Foundation Models"
+  authors:
+    - family-names: Li
+      given-names: Xingyan
+    - family-names: Caraballo-Vega
+      given-names: Jordan A.
+    - family-names: Gong
+      given-names: Jie
+    - family-names: Carroll
+      given-names: Mark L.
+    - family-names: Wang
+      given-names: Jianwu
+  collection-title: "The 34th ACM International Conference on Advances in Geographic Information Systems (SIGSPATIAL '26)"
+  conference:
+    name: "ACM SIGSPATIAL 2026"
+    city: Riverside
+    region: CA
+    country: US
+  publisher:
+    name: ACM
+  year: 2026
+  doi: "10.1145/3841645.3842981"
+  identifiers:
+    - type: other
+      value: "arXiv:2608.01751"
+      description: arXiv preprint
