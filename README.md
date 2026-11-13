@@ -1,17 +1,27 @@
-# SPECTRA
+<h1 align="center">SPECTRA</h1>
 
-**SPECTRA: Band-Routed Embedding and Stage-Wise LoRA for Cross-Sensor Fine-Tuning of Geospatial Foundation Models**
+<p align="center">
+  <b>SPECTRA: Band-Routed Embedding and Stage-Wise LoRA for Cross-Sensor Fine-Tuning of Geospatial Foundation Models</b>
+</p>
 
-Xingyan Li<sup>1</sup>, Jordan A. Caraballo-Vega<sup>2</sup>, Jie Gong<sup>2</sup>, Mark L. Carroll<sup>2</sup>, Jianwu Wang<sup>1</sup><br>
-<sup>1</sup>University of Maryland, Baltimore County &nbsp; <sup>2</sup>NASA Goddard Space Flight Center
+<p align="center">
+  Xingyan Li<sup>1</sup>, Jordan A. Caraballo-Vega<sup>2</sup>, Jie Gong<sup>2</sup>, Mark L. Carroll<sup>2</sup>, Jianwu Wang<sup>1</sup><br>
+  <sup>1</sup>University of Maryland, Baltimore County &nbsp; <sup>2</sup>NASA Goddard Space Flight Center
+</p>
 
-ACM SIGSPATIAL 2026, Research Track
+<p align="center">
+  ACM SIGSPATIAL 2026, Research Track<br>
+  <a href="https://arxiv.org/abs/2608.01751">Paper (arXiv:2608.01751)</a> &nbsp;|&nbsp;
+  <a href="https://doi.org/10.1145/3841645.3842981">DOI 10.1145/3841645.3842981</a>
+</p>
 
-[Project page and inference explorer](https://big-data-lab-umbc.github.io/SPECTRA/) |
-[Paper (arXiv:2608.01751)](https://arxiv.org/abs/2608.01751) |
-[DOI 10.1145/3841645.3842981](https://doi.org/10.1145/3841645.3842981)
+<p align="center">
+  <a href="https://big-data-lab-umbc.github.io/SPECTRA/"><img src="docs/assets/img/readme_button.png" alt="Open the SPECTRA project page and inference explorer" width="400"></a>
+</p>
 
-![SPECTRA architecture: Band-Routed Embedding feeds a frozen patch embedding and a four-stage encoder with stage-wise LoRA; the ST-planner assigns the LoRA ranks](docs/assets/img/fig2_architecture.png)
+<p align="center">
+  <a href="https://big-data-lab-umbc.github.io/SPECTRA/"><img src="docs/assets/img/readme_preview.png" alt="Preview of the SPECTRA project page at big-data-lab-umbc.github.io/SPECTRA: title, authors, and a Sen1Floods11 test tile comparing LoRA-32 and SPECTRA predictions" width="780"></a>
+</p>
 
 This repository contains the implementation of **SPECTRA**, a parameter-efficient
 fine-tuning framework for segmentation with EO-pretrained geospatial foundation
@@ -25,6 +35,8 @@ SPECTRA combines:
 2. **ST-LoRA**: Stage-wise Transferability-aware LoRA. The **STPlanner** profiles
    stage-wise transferability and chooses per-stage LoRA ranks under a LoRA rank
    budget. Both `transfer` and `repair` planning modes are included.
+
+![SPECTRA architecture: Band-Routed Embedding feeds a frozen patch embedding and a four-stage encoder with stage-wise LoRA; the ST-planner assigns the LoRA ranks](docs/assets/img/fig2_architecture.png)
 
 The public training CLI exposes only the methods used for the main comparison
 table:
